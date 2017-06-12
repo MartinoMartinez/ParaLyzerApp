@@ -259,6 +259,18 @@ class ParaLyzerCore(Logger):
         collectFirst = not flags.get( 'perChamber', True  )
         collectCnt   =     flags.get( 'cnti'      , False )
         collectVia   =     flags.get( 'viai'      , False )
+        
+        # pre-sort dictionary
+        # since dicts use string keys, sort doesn't work properly
+        # we need to turn it into an integer list
+        dummyList = []
+        for key in definedElectrodePairs.keys():
+            dummyList.append(int(key))
+        # sort the integer list
+        dummyList.sort()
+        # return to string for later use as key
+        dummyList = [str(i) for i in dummyList]
+        
                 
         # first collect all electrode pairs of one type (or both)
         # and then sort them ... always first cnt and then via electrode pairs
@@ -268,23 +280,23 @@ class ParaLyzerCore(Logger):
             viaPairs = []
 
             # collect pairs from active electrodes
-            for key, val in sorted(definedElectrodePairs.items()):
+            for key in dummyList:
                 # counting pairs - odd numbers
                 if int(key) % 2:
                     if collectCnt:
-                        cntPairs.append( val )
+                        cntPairs.append( definedElectrodePairs[key] )
                         
                 # counting pairs - even numbers
                 else:
                     if collectVia:
-                        viaPairs.append( val )
+                        viaPairs.append( definedElectrodePairs[key] )
                         
             ePairs = cntPairs + viaPairs
         
         # just sort the list in ascending fashion
         else:
-            for key, val in sorted(definedElectrodePairs.items()):
-                ePairs.append( val )
+            for key in dummyList:
+                ePairs.append( definedElectrodePairs[key] )
                 
         return ePairs
         

@@ -9,64 +9,42 @@ Created on Tue May  9 18:46:57 2017
 import serial
 import serial.tools.list_ports
 
-import threading
-import types
+from time import sleep
 
-from time import sleep, time
-
-try:
-    from libs import coreUtilities as coreUtils
-except ImportError:
-    import coreUtilities as coreUtils
+# just load in case it has not been loaded yet
+#if 'coreUtilities' not in sys.modules:
+#    try:
+#        from libs import coreUtilities as coreUtils
+#    except ImportError:
+#        import coreUtilities as coreUtils
         
         
 
 class ComDevice:
     
-    def __init__(self, detectFunc=None, initAfterDetectFunc=None, listenFunc=None, **flags):
+    def __init__(self, detCallback=None, onDetCallback=None, **flags):
         
-        self._comPortList         = []
-        self._comPortListIdx      = 0          # in case multiple devices were found use this
-        self.comPortInfo          = None
-        self.comPort              = None
-        self.comPortStatus        = False
-        self._comPortName         = self.__usbName__ if hasattr(self, '__usbName__') else None
-        self._detMsg              = self.__detMsg__  if hasattr(self, '__detMsg__' ) else None
-        self._initAfterDetectFunc = initAfterDetectFunc        # function to be called after initialization of serial port
-        
-        self._listenFunc          = self._ListenFunction
-        self._listenThread        = None
-        self._listenAlways        = flags.get('listenAlways', False)
-        self._listening           = False
-        self._listenStart         = None
-        self._listenFor           = None
-        
-        self._inMessages          = []
-        self._keepMessages        = flags.get('keepMessages', True)
-        self._messageDelimiter    = flags.get('delimiter', '\n')
-        
-        self._isReadingWriting    = False
-        self._isAboutToOpenClose  = False
-        
-        self.SetListenFunction(listenFunc)
+        self._comPortList              = []
+        self._comPortListIdx           = 0          # in case multiple devices were found use this
+        self.comPortInfo               = None
+        self.comPort                   = None
+        self.comPortStatus             = False
+        self._comPortName              = self.__usbName__ if hasattr(self, '__usbName__') else None
+        self._detMsg                   = self.__detMsg__  if hasattr(self, '__detMsg__' ) else None
+        self._comPortDetectCallback    = onDetCallback        # function to be called after initialization of serial port
+        self._isReadingWriting         = False
+        self._isAboutToOpenClose       = False
         
         # use own function to detect device
         if self._comPortName:
             self.DetectDeviceAndSetupPort(**flags)
         # function to be called for device detection and initialization
-        elif detectFunc:
-            detectFunc()
-           
-        # directly start listening thread after proper init
-#        if self._listenAlways and self.comPortStatus:
-#            self.StartListening()
+        elif detCallback:
+            detCallback()
         
 ### -------------------------------------------------------------------------------------------------------------------------------
 
     def __del__(self):
-        
-        # in case we are still listening
-        self.StopListening()
         
         self.SafeCloseComPort()
         
@@ -77,8 +55,8 @@ class ComDevice:
         self.DetectDevice()
         self.SetupSerialPort(flags)
         
-        if self.comPortStatus and self._initAfterDetectFunc:
-            self._initAfterDetectFunc()
+        if self.comPortStatus and self._comPortDetectCallback:
+            self._comPortDetectCallback()
         
         return self.comPortStatus
         
@@ -95,15 +73,16 @@ class ComDevice:
         self.comPortStatus   = False
         
         # put message to the logger
-        if self._detMsg:
-            coreUtils.SafeLogger('info', self._detMsg, self)
+        if self._detMsg and hasattr(self, 'logger'):
+            self.logger.info(self._detMsg)
         
         # NOTE: serial.tools.list_ports.grep(name) does not seem to work...
         for p in serial.tools.list_ports.comports():
             if self._comPortName in p.description:
                 self._comPortList.append(p)
                 
-                coreUtils.SafeLogger('info', 'Found device \'%s\' on \'%s\'.' % (p[1], p[0]), self)
+                if hasattr(self, 'logger'):
+                    self.logger.info('Found device \'%s\' on \'%s\'.' % (p[1], p[0]))
                 
         if len(self._comPortList) == 1:
             self.comPortInfo = self._comPortList[self._comPortListIdx]
@@ -111,8 +90,8 @@ class ComDevice:
             None
             # multiple ones found...user needs to choose the correct port...
         
-        if not self.comPortInfo:
-            coreUtils.SafeLogger('info', 'Could not be found!', self)
+        if not self.comPortInfo and hasattr(self, 'logger'):
+            self.logger.info('Could not be found!')
             
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -120,7 +99,8 @@ class ComDevice:
     
         if isinstance(self.comPortInfo, serial.tools.list_ports_common.ListPortInfo):
             
-            coreUtils.SafeLogger('info', 'Initializing serial port.', self)
+            if hasattr(self, 'logger'):
+                self.logger.info('Initializing serial port.')
             
             # do it step by step to avoid reset of Arduino by DTR HIGH signal (pulls reset pin)
             # NOTE: some solutions use hardware to solve this problem...
@@ -128,7 +108,8 @@ class ComDevice:
                 self.comPort      = serial.Serial()
                 self.comPort.port = self.comPortInfo.device
             except serial.SerialException:
-                    coreUtils.SafeLogger('error', 'Could not initialize serial port!', self)
+                if hasattr(self, 'logger'):
+                    self.logger.error('Could not initialize serial port!')
             else:
                 try:
                     self.comPort.baudrate = flags.get( 'baudrate', 9600                )
@@ -141,106 +122,12 @@ class ComDevice:
                     self.comPort.dsrdtr   = flags.get( 'dsrdtr'  , False               )
                     self.comPort.dtr      = flags.get( 'dtr'     , False               )
                 except ValueError:
-                    coreUtils.SafeLogger('error', 'Com port initialization: value out of range!', self)
+                    if hasattr(self, 'logger'):
+                        self.logger.error('Com port initialization: value out of range!')
                     
                 # if no exception was raised until here, com port status should be fine
                 else:
                     self.comPortStatus = True
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def _ListenFunction(self):
-        ''' listen to incoming messages and process them according to user flag 'keepMessages'
-        '''
-        
-        if self.SafeOpenComPort():
-            
-            while self._listening:
-                
-                inMsg = self.SafeReadFromComPort('waiting', decode=True, leaveOpen=True)
-                
-#                print('\''+inMsg+'\'')
-                
-                if len(inMsg) > 0:
-                    inMsg = inMsg.split(self._messageDelimiter)
-                    
-                    
-                    # if user wants to handle messages
-                    # append new messages to class member
-                    # user can access later via GetMessages()
-                    if self._keepMessages:
-                        self._inMessages += inMsg
-                    else:
-                        while len(inMsg) > 0:
-                            msg = inMsg.pop(0)
-                            if msg:
-                                coreUtils.SafeLogger('info', msg.strip(chr(241)), self)
-                                
-                # automatically stop loop
-                if self._listenFor:
-                    if (time() - self._listenStart) > self._listenFor:
-                        self._listening = False
-                        
-                sleep(1e-4)
-                
-            self.SafeCloseComPort()
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def StartListening(self, listenFunc=None):
-        
-        self.SetListenFunction(listenFunc)
-        
-        # try to join from last run
-        if self._listenThread:
-            self._listenThread.join()
-        
-        self._listenThread = threading.Thread(target=self._listenFunc)
-        
-        # enable while loop in listen func
-        self._listening = True
-        
-        self._listenThread.start()
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def StopListening(self):
-        
-        # stop while loop in listen func
-        self._listening = False
-        
-        if self._listenThread:
-            self._listenThread.join()
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def ListenFor(self, secs):
-        
-        assert isinstance(secs, (int, float)), 'Expected int or float, not %r' % type(secs)
-        
-        self._listenFor = secs
-        
-        # stop from last run
-        self.StopListening()
-        
-        self._listenThread = threading.Thread(target=self._listenFunc)
-        
-        # enable while loop in listen func
-        self._listening = True
-        
-        self._listenThread.start()
-        
-        self._listenStart = time()
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def SetListenFunction(self, listenFunc):
-        
-        if listenFunc:
-            
-            assert isinstance(listenFunc, types.FunctionType), 'Expect callable, not %r' % type(listenFunc)
-            
-            self._listenFunc = listenFunc
             
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -266,7 +153,8 @@ class ComDevice:
                 # to avoid any contact afterwards
                 self.comPortStatus = False
             
-                coreUtils.SafeLogger('error', 'Could not open serial port!', self)
+                if hasattr(self, 'logger'):
+                    self.logger.error('Could not open serial port!')
             else:
                 # opening finished
                 self._isAboutToOpenClose = False
@@ -297,7 +185,8 @@ class ComDevice:
                 # to avoid any contact afterwards
                 self.comPortStatus = False
                 
-                coreUtils.SafeLogger('error', 'Could not close serial port!', self)
+                if hasattr(self, 'logger'):
+                    self.logger.error('Could not close serial port!')
             else:
                 # closing finished
                 self._isAboutToOpenClose = False
@@ -323,8 +212,8 @@ class ComDevice:
             except (serial.SerialException, serial.SerialTimeoutException):
                 self.comPortStatus = False
                 success = False
-                
-                coreUtils.SafeLogger('error', 'Could not write: \'%s\' to port \'%s\'!' % (outData, self.comPortInfo[0]), self)
+                if hasattr(self, 'logger'):
+                    self.logger.error( 'Could not write: \'%s\' to port \'%s\'!' % (outData, self.comPortInfo[0]) )                
                 
             finally:
                 # release lock
@@ -389,8 +278,8 @@ class ComDevice:
                             
             except (serial.SerialException, serial.SerialTimeoutException):
                 self.comPortStatus = False
-                
-                coreUtils.SafeLogger('error', 'Could not read bytes from port \'%s\'!' % self.comPortInfo[0], self)
+                if hasattr(self, 'logger'):
+                    self.logger.error('Could not read bytes from port \'%s\'!' % self.comPortInfo[0])
             
             finally:
                 # release lock
@@ -413,9 +302,4 @@ class ComDevice:
     
     def GetPortInfo(self):
         return self.comPortInfo[1]
-            
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def GetMessages(self):
-        return self._inMessages
                 

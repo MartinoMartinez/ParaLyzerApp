@@ -969,6 +969,7 @@ class ParaLyzerApp(Logger, StatusBar):
             self.UpdateLeftStatus ( self.paraLyzerCore.hf2.GetCurrentStreamFolder() )
             self.UpdateMidStatus  ( (now-sTime).__str__()                           )
             self.UpdateRightStatus( self.paraLyzerCore.hf2.GetRecordingString()     )
+            print(self.paraLyzerCore.arduino.comPort.read(self.paraLyzerCore.arduino.comPort.in_waiting))
             
             sleep(1)
         

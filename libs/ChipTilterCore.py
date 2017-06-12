@@ -107,7 +107,7 @@ class ChipTilterCore(CoreDevice):
         self.currentParameterSet = self.GetDefaultParameterSet()
         
         
-        flags['onDetCallback'] = self.StartInMessageThread
+        flags['initAfterDetectFunc'] = self.StartInMessageThread
         
         CoreDevice.__init__(self, **flags)
         
@@ -160,10 +160,10 @@ class ChipTilterCore(CoreDevice):
 
     def WriteValueToAddress(self, address, value):
         
-        if self.SaveOpenComPort():
+        if self.SafeOpenComPort():
             self.WriteStream(self.GenerateByteStream(address, value))
             
-            self.SaveCloseComPort()
+            self.SafeCloseComPort()
         
 ### -------------------------------------------------------------------------------------------------------------------------------
 
@@ -174,7 +174,7 @@ class ChipTilterCore(CoreDevice):
         if not byteStream:
             byteStream = self.setup['byteStream']
         
-        if self.SaveOpenComPort():
+        if self.SafeOpenComPort():
             
             for bStream in byteStream:
                 if mode == 'normal':
@@ -186,7 +186,7 @@ class ChipTilterCore(CoreDevice):
                 if not success:
                     break
                 
-            if not self.SaveCloseComPort():
+            if not self.SafeCloseComPort():
                 success = False
             else:
                 self.logger.info('Tilter setup updated.')
@@ -235,7 +235,7 @@ class ChipTilterCore(CoreDevice):
         success = True
         
         if self.comPortStatus:
-            if self.SaveWriteToComPort(b, leaveOpen=True):
+            if self.SafeWriteToComPort(b, leaveOpen=True):
                 sleep(50e-3)
                 self.logger.debug( 'Sent %s to tilter' % coreUtils.GetTextFromByteStream(b) )
             else:
@@ -247,7 +247,7 @@ class ChipTilterCore(CoreDevice):
 
     def ReadStream(self):
         
-        if self.SaveOpenComPort():
+        if self.SafeOpenComPort():
             
             # reset tilter state for new run
             self.tilterState = self.GetDefaultTilterState()
@@ -256,7 +256,7 @@ class ChipTilterCore(CoreDevice):
                 
                 # after splitting last entry in list is always emtpy, if character was in stream
                 # check for this, otherwise wait for new input
-                inMsg = self.SaveReadFromComPort('line', decode=True, leaveOpen=True)
+                inMsg = self.SafeReadFromComPort('line', decode=True, leaveOpen=True)
                 
                 if len(inMsg) != 0:
                     self.HandleInMessageQueue(inMsg)
@@ -271,7 +271,7 @@ class ChipTilterCore(CoreDevice):
                 sleep(1)
         
             # properly close port
-            self.SaveCloseComPort()
+            self.SafeCloseComPort()
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
@@ -439,12 +439,12 @@ class ChipTilterCore(CoreDevice):
         # com port status is OK
         else:
             
-            if self.SaveOpenComPort():
+            if self.SafeOpenComPort():
                 
                 # try to start tilter
                 success = self.WriteStream( self.GenerateByteStream(self._addresses['status'], self._statusBits['startTilter']) )
                     
-                self.SaveCloseComPort()
+                self.SafeCloseComPort()
                 
                 if success:
                     self.isTilting = True
@@ -465,12 +465,12 @@ class ChipTilterCore(CoreDevice):
         # com port status is OK
         else:
             
-            if self.SaveOpenComPort():
+            if self.SafeOpenComPort():
                 
                 # try to stop tilter
                 success = self.WriteStream( self.GenerateByteStream(self._addresses['status'], self._statusBits['stopTilter']) )
                     
-                self.SaveCloseComPort()
+                self.SafeCloseComPort()
                 
                 if success:
                     self.isTilting = False

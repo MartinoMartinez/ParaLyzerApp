@@ -25,6 +25,7 @@ except ImportError:
     import coreUtilities as coreUtils
 
 
+    
 class Hf2Core(CoreDevice):
     
     __deviceId__         = ['dev10', 'dev275']
@@ -32,8 +33,9 @@ class Hf2Core(CoreDevice):
         
     __recordingDevices__ = '/demods/*/sample'   # device ID is added later...
     
+    # default parameters for storing determination
     __maxStrmFlSize__    = 10     # 10 MB
-    __maxStrmTime__      = 0.5    # 0.5 min
+    __maxStrmTime__      = 0.5    # 30 s
     
     # supported stream modes
     __storageModes__     = ['fileSize', 'recTime', 'tilterSync']
@@ -52,7 +54,7 @@ class Hf2Core(CoreDevice):
         # initially no measurement is running
         self._poll       = False
         self._pollThread = None
-        # create locker to savely run parallel threads
+        # create locker to safely run parallel threads
         self._pollLocker = threading.Lock()
         
         # not know so far, cause no device is connected
@@ -79,8 +81,15 @@ class Hf2Core(CoreDevice):
             self._storageMode = storageMode
         else:
             raise Exception('Unsupported storage mode: %s' % storageMode)
+            
+        # check for ambiguous setup
+        if 'streamFileSize' in flags.keys() and 'streamTime' in flags.keys():
+            raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
+        else:
+            self.SetStreamFileSize( flags.get( 'streamFileSize', self.__maxStrmFlSize__ ) )
+            self.SetStreamTime    ( flags.get( 'streamTime'    , self.__maxStrmTime__   ) )
         
-        flags['detCallback'] = self.DetectDeviceAndSetupPort
+        flags['detectFunc'] = self.DetectDeviceAndSetupPort
         
         CoreDevice.__init__(self, **flags)
     
@@ -111,7 +120,7 @@ class Hf2Core(CoreDevice):
                 self.deviceName        = device
                 self.comPort           = daq
                 self.comPortStatus     = props['available']
-                self.comPortInfo       = ['', '%s on %s:%s' % (device.capitalize(), props['serveraddress'], props['serverport'])]
+                self.comPortInfo       = ['', '%s on %s:%s' % (device.upper(), props['serveraddress'], props['serverport'])]
                 self._recordingDevices = '/' + device + self.__recordingDevices__
                 
                 # no need to search further
@@ -138,7 +147,7 @@ class Hf2Core(CoreDevice):
             if coreUtils.SafeMakeDir(sF, self):
                 sF += '/session_' + self.coreStartTime + '/'
                 if coreUtils.SafeMakeDir(sF, self):
-                    sF += 'stream%04d/' % self.strmFldrCnt
+                    sF += 'stream%04d/' % self._strmFldrCnt
                     if coreUtils.SafeMakeDir(sF, self):
                         # set new stream folder to class var
                         self._streamFolder = sF
@@ -158,6 +167,10 @@ class Hf2Core(CoreDevice):
             self._pollThread.start()
             
             self._recordString = 'Recording...'
+            
+            
+            self._debugThread = threading.Thread(target=self.DebugDioThread)
+            self._debugThread.start()
         
         return success
         
@@ -169,20 +182,21 @@ class Hf2Core(CoreDevice):
             # end loop in _PollData method
             self._poll = False
             # end poll thread
-            self.pollThread.join()
+            self._pollThread.join()
+            self._debugThread.join()
             
             # write last part of the data to disk
             self.WriteMatFileToDisk()
             # reset file counter for next run
-            self.strmFlCnt = 0
+            self._strmFlCnt = 0
             
             if 'prc' in flags:
                 if flags['prc']:
-                    self.recordString = 'Paused...'
+                    self._recordString = 'Paused...'
                 else:
-                    self.recordString = 'Stopped.'
+                    self._recordString = 'Stopped.'
             else:
-                self.recordString = 'Stopped.'
+                self._recordString = 'Stopped.'
             
 #            plt.plot(self.timer['idx'], self.timer['elt'])
         
@@ -206,7 +220,7 @@ class Hf2Core(CoreDevice):
         # clear from last run
         self._recordFlags = {
                         'dataloss':False,
-                        'invTimeStamp':False
+                        'invalidtimestamp':False
                     }
         
         # check status of device... start if OK
@@ -219,7 +233,7 @@ class Hf2Core(CoreDevice):
             
             while self._poll:
                 
-                # lock thread to savely process
+                # lock thread to safely process
                 self._pollLocker.acquire()
                 
                 # for lag debugging
@@ -247,12 +261,14 @@ class Hf2Core(CoreDevice):
                         if k in dataBuf[key].keys():
                             self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
                             
-                            # save flags for later use in GUI
-                            # look at dataloss and invalid time stamps
-                            if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
-                                self.logger.warning('%s was recognized! Data might be corrupted!' % k)
-                                self._recordFlags[k] = True
-                    
+                        # save flags for later use in GUI
+                        # look at dataloss and invalid time stamps
+                        if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
+                            self.logger.warning('%s was recognized! Data might be corrupted!' % k)
+                            self._recordFlags[k] = True
+
+
+                self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
                     
 ########################################################
 #   --- THIS IS HERE FOR SIMPLE PLOTTING REASONS ---   #
@@ -279,33 +295,41 @@ class Hf2Core(CoreDevice):
 #                    self.demods[key]['r'] = np.concatenate([self.demods[key]['r'], r])
                     
                 
-                # if file size is around 10 MB create a new one
-#                if (self.total_size(self.demods) // 1024**2) > (self._maxStrmFlSize-1):
-                if ( time() - streamTime ) / 60 > self.__maxStrmTime__:
-                    self.WriteMatFileToDisk()
-                    streamTime = time()
+                # check, according to strorage mode, if it's necessary to store a new file
+                if self._storageMode == 'fileSize':
+                    if (coreUtils.GetTotalSize(self._demods) // 1024**2) > (self._maxStreamFileSize-1):
+                        self.WriteMatFileToDisk()
+                        
+                elif self._storageMode == 'recTime':
+                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
+                        self.WriteMatFileToDisk()
+                        streamTime = time()
+                        
+                elif self._storageMode == 'tilterSync':
+                    None
                 
                 # critical stuff is done, release lock
                 self._pollLocker.release()
                     
-                    # unsubscribe after finished record event
+            # unsubscribe after finished record event
             self.comPort.unsubscribe('*')
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def GetRecordFlags(self):
-        return self.recordFlags
+        return self._recordFlags
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def _GetStandardRecordStructure(self):
         return {
-                    'x':         sp.array([]),
-                    'y':         sp.array([]),
+                    'x'        : sp.array([]),
+                    'y'        : sp.array([]),
                     'timestamp': sp.array([]),
                     'frequency': sp.array([]),
 #                    'phase':     np.array([]),
-                    'dio':       sp.array([])
+                    'dio'      : sp.array([]),
+                    'ePair'    : sp.array([])           # to decode the DIO byte from HF2 into electrode pair
 #                    'auxin0':    np.array([]),
 #                    'auxin1':    np.array([])
                     
@@ -327,10 +351,10 @@ class Hf2Core(CoreDevice):
         # create this just for debugging...
         outFileBuf = {'demods': []}
             
-        for key in self.demods.keys():
+        for key in self._demods.keys():
             buf = {}
-            for k in self.demods[key]:
-                buf[k] = self.demods[key][k]
+            for k in self._demods[key]:
+                buf[k] = self._demods[key][k]
             outFileBuf['demods'].append(buf)
             
         sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: outFileBuf})
@@ -348,7 +372,62 @@ class Hf2Core(CoreDevice):
     
     def GetRecordingString(self):
         return self._recordString
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetBaseStreamFolder(self, baseStreamFolder):
+        
+        if coreUtils.IsAccessible(baseStreamFolder, 'write'):
+            self._baseStreamFolder = baseStreamFolder
+            self._streamFolder     = baseStreamFolder
+        else:
+            raise Exception('ERROR: Cannot access given path for writing Matlab files!')
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStorageMode(self, storageMode):
+        
+        if storageMode in self.__storageModes__:
+            self._storageMode = storageMode
+        else:
+            raise Exception('Unsupported storage mode: %s' % storageMode)
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStreamFileSize(self, fileSize):
+        
+        assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
+        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
+        
+        self._maxStreamFileSize = fileSize
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStreamTime(self, streamTime):
+        
+        assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
+        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
+        
+        self._maxStreamTime = streamTime
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def DebugDioThread(self):
+        
+        while self._poll:
+            for key in self._demods.keys():
+                print('DIO: %s' % self._demods[key]['ePair'])
+            sleep(1)
             
+            
+def DioByteToChamber(dioByte):
+    ''' HF2 DIO lines are stored in a 32 bit number
+        cut relevant bits and switch order
+        DIO24 - Pin8 ... DIO20 - Pin12
+        so MSB in Arduino is LSB for HF2
+        return decimal number from the cut 5 bits
+    '''
+    return [ int(format(int(i), '032b')[7:12][::-1], 2) for i in dioByte]
             
             
             
@@ -360,6 +439,18 @@ class Hf2Core(CoreDevice):
 
 if __name__ == '__main__':
     
-    hf2 = Hf2Core()
+    # create new HF2 object
+    hf2 = Hf2Core(storageMode='recTime', streamTime=.2)
+#    # create new HF2 object and change standard storage path
+#    hf2 = Hf2Core(baseStreamFolder='C:/TEMP/MY_MATLAB_FILES')
     
+#    # create new HF2 object and change standard storage mode
+#    hf2 = Hf2Core(storageMode='recTime')
     
+    hf2.StartPoll()
+    
+    sleep(5)
+    
+    hf2.StopPoll()
+    
+    hf2.__del__()

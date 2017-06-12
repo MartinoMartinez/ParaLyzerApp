@@ -21,12 +21,9 @@ from datetime import datetime
 
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-def LoadJsonFile(fName, caller='coreUtilities'):
+def LoadJsonFile(fName, caller=None):
     
     jsonStruct = {}
-
-    # get logger from module name
-    logger = log.getLogger(caller)
     
     if IsAccessible(fName):
         try:
@@ -34,13 +31,13 @@ def LoadJsonFile(fName, caller='coreUtilities'):
             with open(fName, 'rt') as f:
                 jsonStruct = json.load(f)
         except PermissionError:
-            logger.error('Could not access file: \'%s\'! Please check permissions...' % fName)
+            SafeLogger('error', 'Could not access file: \'%s\'! Please check permissions...' % fName, caller)
         except FileNotFoundError:
-            logger.error('Could not find file: \'%s\'!' % fName)
+            SafeLogger('error', 'Could not find file: \'%s\'!' % fName, caller)
         except IOError:
-            logger.error('Could not read file: \'%s\'!' % fName)
+            SafeLogger('error', 'Could not read file: \'%s\'!' % fName, caller)
         except ValueError:
-            logger.error('Could not encode JSON structure from file: \'%s\'!' % fName)
+            SafeLogger('error', 'Could not encode JSON structure from file: \'%s\'!' % fName, caller)
     
     return jsonStruct
 
@@ -53,16 +50,10 @@ def DumpJsonFile(jsonStruct, fName, caller=None):
         with open(fName, 'wt') as f:
             json.dump(jsonStruct, f)
     except PermissionError:
-        if hasattr(caller, 'logger'):
-            caller.logger.error('Could not access file: \'%s\'! Please check permissions...' % fName)
-        else:
-            print('ERROR: Could not access file: \'%s\'! Please check permissions...' % fName)
+        SafeLogger('error', 'Could not access file: \'%s\'! Please check permissions...' % fName, caller)
         raise
     except FileNotFoundError:
-        if hasattr(caller, 'logger'):
-            caller.logger.error('Could not find file: \'%s\'!' % fName)
-        else:
-            print('ERROR: Could not find file: \'%s\'!' % fName)
+        SafeLogger('error', 'Could not find file: \'%s\'!' % fName, caller)
         raise
     else:
         return True
@@ -100,10 +91,7 @@ def GetRelativePath(absPath, caller=None):
         else:
             relPath = './' + os.path.split(absPath)[-1] + '/'
     except ValueError:
-        if hasattr(caller, 'logger'):
-            caller.logger.error('Invalid path \'%s\'' % absPath)
-        else:
-            print('ERROR: Invalid path \'%s\'' % absPath)
+        SafeLogger('error', 'Invalid path \'%s\'' % absPath, caller)
         
     return relPath
     
@@ -121,15 +109,9 @@ def SafeMakeDir(folder, caller=None):
         try:
             os.makedirs(folder)
         except OSError:
-            if hasattr(caller, 'logger'):
-                caller.logger.error('Could not create folder \'%s\'!' % folder)
-            else:
-                print('ERROR: Could not create folder \'%s\'!' % folder)
+            SafeLogger('error', 'Could not create folder \'%s\'!' % folder, caller)
         else:
-            if hasattr(caller, 'logger'):
-                caller.logger.info('Created folder \'%s\'' % folder)
-            else:
-                print('INFO: Created folder \'%s\'' % folder)
+            SafeLogger('info', 'Created folder \'%s\'' % folder, caller)
             
     return success
     
@@ -210,6 +192,21 @@ def GetStringFromMinSec(secs, mins=-1):
     
     return tString
     
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+def SafeLogger(level, msg, caller=None):
+    
+    if hasattr(caller, 'logger'):
+        if level == 'debug':
+            caller.logger.debug(msg)
+        elif level == 'info':
+            caller.logger.info(msg)
+        elif level == 'warning':
+            caller.logger.warning(msg)
+        elif level == 'error':
+            caller.logger.error(msg)
+    else:
+        print( '%s: %s' % (level.upper(), msg) )
 
 ### -------------------------------------------------------------------------------------------------------------------------------
     

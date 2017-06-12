@@ -29,22 +29,22 @@ class CoreDevice(ComDevice, Logger):
     
     def __init__(self, coreStartTime=None, **flags):
         
-        self.coreStartTime = coreStartTime if coreStartTime else coreUtils.GetDateTimeAsString()
-        logFile            = flags.get( 'logFile'       )
-        logLevel           = flags.get( 'logLevel'      )
-        detCallback        = flags.get( 'detCallback'   )
-        onDetCallback      = flags.get( 'onDetCallback' )
+        self.coreStartTime  = coreStartTime if coreStartTime else coreUtils.GetDateTimeAsString()
+        logFile             = flags.get( 'logFile'             )
+        logLevel            = flags.get( 'logLevel'            )
+        detectFunc          = flags.get( 'detectFunc'          )
+        initAfterDetectFunc = flags.get( 'initAfterDetectFunc' )
         
-        if detCallback:
-            flags.pop('detCallback')
-        if onDetCallback:
-            flags.pop('onDetCallback')
+        if detectFunc:
+            flags.pop('detectFunc')
+        if initAfterDetectFunc:
+            flags.pop('initAfterDetectFunc')
         
         # initialize logger
         Logger.__init__(self, logFile=logFile, logLevel=logLevel, startTime=self.coreStartTime)
         
         # initialize com port
-        ComDevice.__init__(self, detCallback, onDetCallback, **flags)
+        ComDevice.__init__(self, detectFunc, initAfterDetectFunc, **flags)
 
 ### -------------------------------------------------------------------------------------------------------------------------------
 

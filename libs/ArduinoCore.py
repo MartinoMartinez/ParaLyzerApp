@@ -37,8 +37,8 @@ class ArduinoCore(CoreDevice):
     def __init__(self, chipConfig='', switchConfig='', selectElectrodePairs=None, **flags):
             
         # setup com port
-        flags['baudrate'] = self.__baudrate__
-        flags['dtr']      = self.__dtr__
+        flags['baudrate']     = self.__baudrate__
+        flags['dtr']          = self.__dtr__
         
         CoreDevice.__init__(self, **flags)
         
@@ -63,7 +63,7 @@ class ArduinoCore(CoreDevice):
         
         # define empty electrode pair dictionary
         self._definedElectrodePairs = {
-        # this dictionary contains several standard structures depending on the electrode pair that was defined
+        # this dictionary contains several standard structures depending on the electrode pairs that were defined
 #                'ID': {
 #                     'ePair': -1,
 #                     'int'  : -1
@@ -121,22 +121,30 @@ class ArduinoCore(CoreDevice):
         
         success = False
         
-        if self.SaveOpenComPort():
+        if self.SafeOpenComPort():
+            
+            # calculate check sum to make sure Arduino receives the correct stuff
+            # just sum up the whole shit and add to message in HEX format, e.g. 1A9 for 0x01A9
+            checkSum = hex(sum([ord(i) for i in msg])).replace('0x','')
             
             # write message
             # NOTE: encoding as byte is required by pySerial
             # do not forget '\n' (newline) for command recognition
             # NOTE: flush is deprecated with pySerial > v3.0
-            msg += '\r'
+            msg = 'START %s %s END\r' % (checkSum, msg)
             
-            success = self.SaveWriteToComPort(msg.encode('latin-1'), leaveOpen=True)
+            print(msg)
+
             
-            if success:
-                if self._debugMode:
-                    
-                    inMsg = self.SaveReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
-                    
-                    self.logger.debug('Received message from Arduino: %s' % inMsg)
+            success = self.SafeWriteToComPort(msg.encode('latin-1'), leaveOpen=True)
+            
+            
+#            if success:
+#                if self._debugMode:
+#                    
+#                    inMsg = self.SafeReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
+#                    
+#                    self.logger.debug('Received message from Arduino: %s' % inMsg)
                         
         return success
     
@@ -181,6 +189,12 @@ class ArduinoCore(CoreDevice):
                     switchesToActivate.append(switchId)
                 if (self._switchConfig[switchId]['padId'] == pads['recPadId']  and self._switchConfig[switchId]['padType'] == 'rec'):
                     switchesToActivate.append(switchId)
+
+                ############################################
+                ###    --- PUT YOUR EXTENSION HERE ---   ###
+                ###                                      ###
+                ### switchesToActivate.append(...)       ###
+                ############################################
                     
         # make sure Arduino receives sorted list
         # otherwise daisy chaining might not work
@@ -272,10 +286,10 @@ class ArduinoCore(CoreDevice):
         if success:
             
             # enable/disable debug for Arduino
-            if self._debugMode:
-                success = self.SendMessage('debug 1')
-            else:
-                success = self.SendMessage('debug 0')
+#            if self._debugMode:
+#                success = self.SendMessage('debug 1')
+#            else:
+#                success = self.SendMessage('debug 0')
                     
             
             # check if something is in stream
@@ -364,8 +378,21 @@ class ArduinoCore(CoreDevice):
             
         # otherwise just sort the list in ascending order and return it
         else:
-            for key, val in sorted(self._definedElectrodePairs.items()):
-                ePairs.append( val )
+            
+            # pre-sort dictionary
+            # since dicts use string keys, sort doesn't work properly
+            # we need to turn it into an integer list
+            dummyList = []
+            for key in self._definedElectrodePairs.keys():
+                dummyList.append(int(key))
+            # sort the integer list
+            dummyList.sort()
+            # return to string for later use as key
+            dummyList = [str(i) for i in dummyList]
+
+            # just sort the list in ascending fashion
+            for key in dummyList:
+                ePairs.append( self._definedElectrodePairs[key] )
                 
         return ePairs
         
@@ -451,61 +478,63 @@ if __name__ == '__main__':
 #    arduino.UpdateConfig(chipConfig='./ChipConfig.json')
     
     # enable debug mode here to catch incoming messages
-    arduino.EnableDebug()
     
-    # execute blinking test to check the connection and proper running of Arduino code
-    arduino.SendMessage('test')
-    
-    # test might take a while...so better sleep
-    sleep(4)
-    
+    sleep(1)
+
+#    arduino.EnableDebug()
+#        
+#    
+#    # execute blinking test to check the connection and proper running of Arduino code
+#    arduino.SendMessage('test')
+#    
+#    # test might take a while...so better sleep
+#    sleep(4)
+#    
     # print all available commands
-    arduino.SendMessage('help')
-    
-    
-    #######################################################
-    ### --- FIRST OPTION TO SEND A SETUP TO ARDUINO --- ###
-    #######################################################
-    
-    # generate debug stream and send command
-    # use one of the fixed switch assignments on the PCB - a short between two switches
-    arduino.SendMessage( 'setelectrodes 1 %s' % arduino.GenerateSendStream('short') )
-    
-    
-    ########################################################
-    ### --- SECOND OPTION TO SEND A SETUP TO ARDUINO --- ###
-    ########################################################
-    
-    # let's define an electrode pair setup
-    # time is given in us --> 1e6 us = 1 s
-    arduino.DefineElectrodePair(  0, 1e6   )
-    # another one here for 500 ms
-    arduino.DefineElectrodePair(  5, 500e3 )
-    # and a third one for 3 s
-    arduino.DefineElectrodePair( 12, 3e6   )
-    
-    # write all three setups to Arduino - ascending order will be used
+#    s = 'help'
+#    
+#    checksum = hex(sum([ord(i) for i in s])).replace('0x','')
+#    
+#    msg = 'START %s %s END\r' % (checksum, s)
+#    
+#    arduino.comPort.open()
+#    arduino.comPort.write(msg.encode('latin-1'))
+
+    for i in range(30):
+        arduino.DefineElectrodePair(i, 1e6)
+        
     arduino.SetupArduino()
     
-    # start timer for Arduino to switch between the different setups
+#    arduino.SendMessage( 'setelectrodes 1 %s' % arduino.GenerateSendStream(15,0) )
+#    arduino.SendMessage('setelectrodes 1 125ABCDEFG')
+    from time import time
+    sT = time()
+    while time()-sT < 2:
+        print(arduino.comPort.read(arduino.comPort.in_waiting))
+        sleep(100e-3)
+    
     arduino.Start()
     
-    # we have defined three setups with in total 4.5 s - so let's wait 5 s
-    sleep(5)
+    sT = time()
+    while time()-sT < 40:
+        print(arduino.comPort.read(arduino.comPort.in_waiting))
+        sleep(.5)
     
-    # stop Arduino
     arduino.Stop()
+    arduino.comPort.close()
+#    
+#    
+#    #######################################################
+#    ### --- FIRST OPTION TO SEND A SETUP TO ARDUINO --- ###
+#    #######################################################
+#    
+#    # generate debug stream and send command
+#    # use one of the fixed switch assignments on the PCB - a short between two switches
+#    arduino.SendMessage( 'setelectrodes 1 %s' % arduino.GenerateSendStream('short') )
+#    
+#    arduino.SetupArduino()
+#    
+#    
     
-    # do not show debug messages
-    arduino.logger.setLevel('INFO')
-    
-    # use user defined function to select and/or sort defined electrode pairs and send it to Arduino
-    arduino.SetupArduino(MySelectElectrodePairFunction)
-    
-    # enabled debug messages again
-    arduino.logger.setLevel('DEBUG')
-    
-    # use user defined function to select and/or sort defined electrode pairs and send it to Arduino
-    arduino.SetupArduino(MySelectElectrodePairFunctionWithFlags, mode='odd', order='ascending')
-    
+
     arduino.__del__()

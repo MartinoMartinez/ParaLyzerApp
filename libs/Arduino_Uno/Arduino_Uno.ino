@@ -36,74 +36,91 @@
 
 #define SIZE_OF_ARRAY(arr)            (sizeof(arr)/sizeof(arr[0]))
 
-#define MAX_DATA_LENGTH               512     // receive max 255 byte of data, excluding command string and number
+#define MAX_DATA_LENGTH               512     // receive max 512 byte of data, excluding command string and number
 #define MAX_OUTPUT_PINS               16
-#define MAX_CHAMBERS                  15
+#define MAX_CHAMBERS                  15      // change if you have more
 
-#define CHAMBER_BYTE_STREAM_LEN       7
 #define DIO_LINE_BYTES                1
-#define SWITCH_BYTES                  2
+#define SWITCH_BYTES                  2     // put your number of switches here, in case you want to change it
 #define INTERVAL_BYTES                4
+#define CHAMBER_BYTE_STREAM_LEN       (DIO_LINE_BYTES + SWITCH_BYTES + INTERVAL_BYTES)
 #define MAX_NUM_SWITCHES              64
 
 
 /* --- SWITCHING SCHEMES --- */
 struct SwitchingScheme {
-  unsigned short activeSwitches[2] = {0};     // store active switches as bytes from 0 to 8*num_ICs ... with current PCB (Ketki v4.0) 0..63 switches
-  unsigned short hf2DioByte;                  // store 5 bits for DIO lines to HF2, first four bits encode chamber + MSB is electrode pair
-  unsigned long chamberInterval;              // store 4 bytes of residence time in us for the chamber, max. 1.19 h, 0 means switch as fast as possible or stay if only one chamber is given
+  uint8_t  activeSwitches[SWITCH_BYTES] = {0};     // store active switches as bytes from 0 to 8*num_ICs ... with current PCB (Ketki v4.0) 0..63 switches
+  uint8_t  hf2DioByte;                             // store 5 bits for DIO lines to HF2
+  uint32_t chamberInterval;                        // store 4 bytes of residence time in us for the electrode pair setup, max. 1.19 h, 0 means switch as fast as possible; in case only one electrode pair is selected this time is ignored
 };
 
 /* --- SERIAL INPUT PROCESSING --- */
-String inputCommand = "";                 // a string to hold incoming data
-String valueString = "";                  // value attached to command
-unsigned int inputValue = 0;              // value attached to the command but converted as uint
-byte data[MAX_DATA_LENGTH] = {0xff};      // array for bytes to process, set first value to 0xff to recognize data input, e.g. for help
-unsigned short byteIdx = 0;
-int bitIdx;
-short swIdx;
-short actSwIdx;
+int8_t     bitIdx   = 0;
+int8_t     swIdx    = 0;
+int8_t     actSwIdx = 0;
+uint16_t   byteIdx  = 0;
+uint16_t   dataIdx  = 0;
+char       data[MAX_DATA_LENGTH] = {'\0'};              // contains all incoming streams, gets overridden evertime a new command is incoming
 
-bool commandComplete = false;             // whether the string is complete
-bool valueComplete   = false;             // whether the value is complete
-bool allComplete     = false;             // whether everything was read from serial port till \n
-bool inByteStream    = false;             // ignore special characters in case byte stream is being read
-bool lockCommand     = false;             // to lock certain command execution
-bool debugMode       = false;             // enable/disable printouts
+const char     header[]    = "START ";                  // to recognize a proper start of the command
+const char     footer[]    = "END\r";                    // to recognize a proper ending of the command
+const char     delimiter[] = " ";                      // to cut the command into its individual parts
+const uint8_t  headerLen   = strlen(header);
+const uint8_t  footerLen   = strlen(footer);
+      int16_t  headerPos   = 0;
+      int16_t  footerPos   = 0;
+      uint16_t checksumPos = 0;
+
+bool headerFound = false;
+bool footerFound = false;
+
+char *checksumString = NULL;           // complete input stream
+char *commandString  = NULL;
+char *valueString    = NULL;
+
+uint8_t  value          = 0;           // converted input value, max is 255
+uint16_t remoteChecksum = 0;           // checksum value of incoming stream
+uint16_t localChecksum  = 0;           // checksum value of received bytes (calculated locally)
+
+bool commandComplete  = false;         // whether the string is complete
+bool valueComplete    = false;         // whether the value is complete
+bool checksumComplete = false;         // whether the value is complete
+bool lockCommand      = false;         // to lock certain command execution
+bool debugMode        = false;         // enable/disable printouts
 
 /* --- OUTPUT SPEED --- */
-unsigned int daisyPeriodTimeHalf = 1;     // This results in a 500 kHz clock (2 us period time)
+uint8_t daisyPeriodTimeHalf = 1;      // This results in a 500 kHz clock (2 us period time)
 
 /* --- PIN STUFF --- */
-unsigned int dioOutputsToHF2[] = {8, 9, 10, 11, 12};   //, 13, 14, 15, 16, 17, 18, 19, 20};  // output pins for clock, sync, din, tilt, chamberIndex1, chamberIndex2, ..., chamberIndexN
-int resetIndex = -1;                      // -1 = no reset pin, otherwise indicates the reset pin that is always pulled up
+uint8_t dioOutputsToHF2[] = {8, 9, 10, 11, 12};   //, 13, 14, 15, 16, 17, 18, 19, 20};  // output pins for clock, sync, din, tilt, chamberIndex1, chamberIndex2, ..., chamberIndexN
+//int8_t  resetIndex = -1;                          // -1 = no reset pin, otherwise indicates the reset pin that is always pulled up
 
 /* --- THORLABS CAMERA STUFF --- */
-unsigned int cameraFrameRate = 20;        // frame rate in ms for the thorlabs camera
-unsigned int cameraTrigHigh = 100;        // high time of trigger pulse in us
-bool triggerCamera = false;               // should camera be triggered
-unsigned long startTimerCamera;
-unsigned long stopTimerCamera;
-unsigned long cameraTimeFrame = (unsigned long)(1e6/cameraFrameRate);
+uint8_t  cameraFrameRate = 20;        // frame rate in ms for the thorlabs camera
+uint8_t  cameraTrigHigh = 100;        // high time of trigger pulse in us
+bool     triggerCamera = false;       // should camera be triggered
+uint32_t startTimerCamera;
+uint32_t stopTimerCamera;
+uint32_t cameraTimeFrame = (uint32_t)(1e6/cameraFrameRate);
 
 /* --- DAISYCHAIN AUTO-LOOP --- */
-struct SwitchingScheme *userSwitchingScheme = NULL;       // allocate array depending on how many chambers should be switched
-unsigned short numSwitchingSchemes = 0;
-unsigned int daisyFrameRate = 2000;                       // frame rate in us for the daisychaining
-unsigned long startTimerDaisy;
-unsigned long stopTimerDaisy;
-unsigned long daisyTimeFrame = (unsigned long)(1e6/daisyFrameRate);
-unsigned short chamberIdx = 0;
+struct   SwitchingScheme *userSwitchingScheme = NULL;       // allocate array depending on how many electrode pairs should be selected
+uint8_t  numSwitchingSchemes = 0;
+uint16_t daisyFrameRate      = 2000;                        // frame rate in us for the daisychaining
+uint32_t startTimerDaisy;
+uint32_t stopTimerDaisy;
+uint32_t daisyTimeFrame      = (uint32_t)(1e6/daisyFrameRate);
+uint8_t  chamberIdx          = 0;
 
 /* --- TILTER STUFF --- */
-unsigned int tilterTrigHigh = 100;        // high time of trigger pulse in us
+uint8_t tilterTrigHigh = 100;        // high time of trigger pulse in us
 bool tiltPlatform = false;
 
 bool startMeas = false;
 
 /* --- BENCHMARKING --- */
-unsigned long startTime = 0;
-unsigned long endTime = 0;
+//uint32_t startTime = 0;
+//uint32_t endTime = 0;
 
 
 
@@ -112,6 +129,11 @@ void setup() {
   // initialize serial
   // NOTE: make sure it's the same speed given in Python code!
   Serial.begin(115200);
+  Serial.setTimeout(10);
+  
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
 
   // might be used without the shield...
 //  SPI.begin(); //initialize the SPI protocol
@@ -133,28 +155,6 @@ void setup() {
 }
 
 void loop() {
-
-  // process received commands
-  if (allComplete && !lockCommand) {
-    
-    // process received command and stop time
-    startTime = micros();
-    parseCommand();
-    endTime = micros();
-    
-    DEBUG_PRINT("execution time: " + String(endTime - startTime) + " us");
-    
-    inputCommand = "";
-    valueString  = "";
-    inputValue   = 0;
-    //inByteIdx = 0;
-    //data[0] = 0xff;             // use this value to check if there is real input for the next command, e.g. with help
-    
-    commandComplete = false;
-    valueComplete   = false;
-    allComplete     = false;
-    inByteStream    = false;
-  }
 
   if (startMeas) {
     
@@ -188,448 +188,366 @@ void loop() {
   }
 }
 
-/*
-  SerialEvent occurs whenever a new data comes in the
- hardware serial RX.  This routine is run between each
- time loop() runs, so using delay inside loop can delay
- response.  Multiple bytes of data may be available.
- */
-void serialEvent() {
-
-  /* NOTE: At the moment parsing takes about 1.4 ms till the daisy chain is written... 
-   * in order to switch chambers faster it's better to only send starting command and let Arduino do the work for generating the byte stream
-   */
+bool FindKeyword(const char *const data, const char *const keyword, const uint16_t dataLen, int16_t *const keywordIdx) {
+  // function that tries to find a keyword in a data stream with the maximum length of 32 kB
   
-  while (Serial.available()) {
-    // get the new byte:
-    char inChar = (char)Serial.read();
+  bool keywordFound = false;
+  uint16_t byteIdx  = 0;
+  uint16_t keyIdx   = 0;
+  uint8_t  keyLen   = strlen(keyword);
 
-//    Serial.println("inChar: " + String(int(inChar)));
+  while (!keywordFound && byteIdx < dataLen) {
 
-    if (!allComplete) {
-      if ( (inChar == ' ' || inChar == '\r') && !inByteStream ) {
-        if (!commandComplete && !valueComplete && !allComplete) {
-          commandComplete = true;
-        }
-        else if (!valueComplete && !allComplete) {
-          valueComplete = true;
-          inByteStream  = true;                       // in case there's more in the pipe set to byte stream
-          byteIdx       = 0;                          // reset here in case strange characters come with the stream via pyserial (0xf0)
-          inputValue    = valueString.toInt();        // returns 0 in case no proper conversion is possible
-        }
-        
-        // check in case message is complete
-        if (!allComplete && inChar == '\r') {
-          allComplete = true;
-        }
-      }
-      else {
-        // NOTE: for some reason the first message after opening the serial port contains \xf0\xf0 at the beginning
-        // so remove it for proper processing afterwards
-        if (!commandComplete && isAlpha(inChar)) {
-          inputCommand += inChar;
-        }
-        else if (commandComplete && !valueComplete && isDigit(inChar)) {
-          valueString += inChar;      // in case a number > 9 is send use a string to collect and convert after
-        }
-        // NOTE: also additional words separated by a space after the command end up here... like 'help camera'
-        else if (inByteStream) {
-          if (byteIdx < inputValue*CHAMBER_BYTE_STREAM_LEN && byteIdx < MAX_DATA_LENGTH) {    // otherwise drop data
-            data[byteIdx++] = (byte)inChar;
-          }
-          else if (byteIdx >= MAX_DATA_LENGTH) {
-            Serial.println("ERROR: Max number of data bytes (" + String(MAX_DATA_LENGTH) + ") was reached!");
-          }
-        }
-        
-        // check again in case message is complete
-        if (!allComplete && inChar == '\r') {
-          allComplete = true;
+    // check if character is the same as in keyword
+    if (data[byteIdx] == keyword[keyIdx]) {
+      ++keyIdx;
+      if (keyIdx == keyLen) {
+        keywordFound = true;
+
+        if (keywordIdx != NULL) {
+          *keywordIdx = byteIdx-keyLen+1;
         }
       }
     }
+    // if not reset the index in case we aready had some letters
+    else {
+      keyIdx = 0;
+    }
+    
+    ++byteIdx;
   }
+
+  // just update keyword index in case nothing was found
+  if (!keywordFound && keywordIdx != NULL) {
+    *keywordIdx = -1;
+  }  
+
+  return keywordFound;
 }
 
-void parseCommand() {
 
-  // throw info, if user wants to...
-  DEBUG_PRINT("received command: \'" + inputCommand + "\'");
 
-//  // for secure execution
-//  lockCommand = true;
-    
-  // user tries to test serial interface
-  // blink 5 times
-  if (inputCommand == "test") {
-    for (int blinkCnt = 0; blinkCnt < 5; ++blinkCnt) {
-      blinkingScheme();
-    }
-    // throw user info
-    Serial.println("Info: Test successfully executed.");
+void serialEvent() {
+
+  value       = 0;
+  dataIdx     = 0;
+  headerFound = false;
+  footerFound = false;
+
+  remoteChecksum = 0;
+  localChecksum  = 0;
+
+  commandComplete = false;
+  
+  commandString = NULL;
+  valueString   = NULL;
+  
+  // read data from serial port and check for header and footer  
+  while (Serial.available() && (!headerFound || !footerFound)) {
+
+    // get new data from serial stream
+    dataIdx = Serial.readBytes(&data[dataIdx], MAX_DATA_LENGTH);
+
+    // check for header and footer
+    headerFound = FindKeyword(data, header, dataIdx, &headerPos);
+    footerFound = FindKeyword(data, footer, dataIdx, &footerPos);
   }
 
-  if (inputCommand == "camera") {
-    /* Specify if camera is connected
-     * Call 'camera 1' to indicate a camera is connected and needs to be triggered.
-     * Call 'camera 0' to virtually unplug the camera (no more trigger pulses will be generated).
-     * 
-      */
+  // here we know both header and footer is in the stream
+  if (headerFound && footerFound) {
     
-    if (valueComplete) {
-      if (inputValue) {
-        triggerCamera = true;
+    // clac checksum pos from found header and its length
+    // NOTE: header already contains a space, so NO +1 necessary
+    checksumPos = headerPos + headerLen;
+    
+    // let's check the checksum in the next step
+    checksumString = strtok( &data[checksumPos], delimiter );
+
+    // first, caluclate local checksum before proceeding
+    // calculate checksum - summing up the ASCII values
+    // should not work if command is missing - so we can use it to 
+    // NOTE: -1 in the loop cause we don't want to count the last space character
+    for (byteIdx = checksumPos + strlen(checksumString); byteIdx < footerPos-1; ++byteIdx) {
+      localChecksum += (uint8_t)data[byteIdx];
+    }
+
+    if (sscanf(checksumString, "%x", &remoteChecksum)) {
+      if (localChecksum == remoteChecksum) {
+        
+        // get command
+        commandString = strtok( NULL, delimiter );
+        commandComplete = true;
       }
       else {
-        triggerCamera = false;
+        Serial.println("Received invalid stream, checksums are not identical!");
       }
     }
     else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
+      Serial.println("Received invalid stream, could not grasp checksum!");
     }
   }
-  
-  if (inputCommand == "help") {
-    // print all available commands
-    String helpString = "List of all available commands:\n";
-    helpString += " camera x\n";
-    helpString += " debug x\n";
-    helpString += " getversion\n";
-    helpString += " help\n";
-//    helpString += " setclockspeed x\n";
-    helpString += " setelectrodes n 0x00\n";
-    helpString += " setframerate x\n";
-    helpString += " start\n";
-    helpString += " stop\n";
-    helpString += " test\n";
-    helpString += " tilt\n";
-    helpString += " tilter x\n";
-    Serial.println(helpString);
+  else {
+    Serial.println("Received invalid stream, could not find header and/or footer!");
   }
-
-  // debug mode - enable/disable all printouts
-  if (inputCommand == "debug") {
-    // debug 1 - enable printouts; debug 0 disbale printouts
     
-    if (valueComplete) {
-      if (inputValue) {
-        debugMode = true;
-        DEBUG_PRINT("Debug mode ON");
-      }
-      else {
-        DEBUG_PRINT("Debug mode OFF");
-        debugMode = false;
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-
-  // just throw current version...
-  else if (inputCommand == "getversion") {
-    Serial.println("Arduino Uno, ArduinoHandler V0.3");
-  }
-  
-  
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-#if 0
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-  
-  // in case any problems arise during daisy chaining decrease the clock speed
-  else if (inputCommand == "setclockspeed") {
-    // "setClockSpeed 10" is setting the clock (of the output data) to 10 microseconds 
-    
-    if (valueComplete) {
-      if (inputValue) {
-        daisyPeriodTimeHalf = (unsigned int)(inputValue/2.0);
+      // valid stream so we can check for the command
+      if (commandComplete) {
         
-        DEBUG_PRINT("Set clockspeed to " + String(1e3/inputValue) + " kHz (bit length is " + String(inputValue) + " us)");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-
-  // toggle reset pin
-// NOTE: actually not used with Python script
-  else if (inputCommand == "setreset") {
-    // "setreset 2" is setting the inverted reset pin (pin which is always held high) to pin number 2. Setting a value of -1 is deactivating any reset pins (hard-wired to pull high)
-    
-    if (valueComplete) {
-      if (inputValue) {
-        resetIndex = inputValue;
+        Serial.println("Received command: " + String(commandString));
         
-        // execute only for valid pin
-        // ignore if we disabled the output (e.g. value of -1)
-        pinMode(resetIndex, OUTPUT);
-        digitalWrite(resetIndex, HIGH);
-        
-        DEBUG_PRINT("Set reset pin to " + String(resetIndex) + ".");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-  
-  // change number of bits per chunk
-  else if (inputCommand == "setbitsperchunk") {
-    // "setBitsPerChunk 11" is setting the number of bits read from a bit sequence to 11, i.e.: clock, sync, data, tilt + 7 bits for encoding the chamber index
-
-    // store only valid values
-    // limit to 16, no more available on board
-    if (valueComplete) {
-      if (inputValue > 0 && inputValue < MAX_OUTPUT_PINS) {
-        csdtiIndicesCount = inputValue;
-        
-        DEBUG_PRINT("Set setbitsperchunk to " + String(csdtiIndicesCount) + " bit.");
-      }
-      else {
-        DEBUG_PRINT("ERROR: Given number is invalid.");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-
-  // NOTE: does not work with the current reading scheme
- 
-  else if (inputCommand == "setpins") {
-
-    /* "setpins 9 5,4,7,2,8,9,10,11,12" is setting the following Arduino pins as outputs:
-     *  9: how many pins are coming...
-     *  5: clock
-     *  4: sync
-     *  7: data
-     *  2: tilt
-     *  8-12: identifier pins encoding the currently active recording site (8-12 = 5 bits = 32 sites)
-     *  NOTE: pins are send as binary
-     *  WARNING: if number of indices > MAX_OUTPUT_PINS, the remaining indices are skipped without warning! -> initialize correct number first by calling setbitsperchunk X
-     */
-    
-    String msg = "";
-    
-    if (valueComplete) {
-      if (inputValue) {
-        for (unsigned int pinIdx = 0; pinIdx < inputValue; ++pinIdx) {
-          // store pins from data array
-          csdtiIndices[pinIdx] = (unsigned int)(data[pinIdx]-48);     // correct for affset in ascii
-          // concat message for user
-          msg += String(pinIdx) + ":" + String(csdtiIndices[pinIdx]) + ", ";
-          // set certain pin as output
-          pinMode(csdtiIndices[pinIdx], OUTPUT);
+        for (int blinkCnt = 0; blinkCnt < 5; ++blinkCnt) {
+          blinkingScheme();
         }
-    
-        DEBUG_PRINT("Set " + String(inputValue) + " pins as output: " + msg + ".");
-      }
-      else {
-        DEBUG_PRINT("ERROR: Given number of pins is invalid.");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-  
-  else if (inputCommand == "processbytes") {
-    // 'processbytes 8 ABCDEFGH' tries to interpret 8 bytes individually from the attached string and sends it to output pins -> clk, sync, output
-    // NOTE: if no bytes are given the content of the last run will be send again...the buffer is not cleared
-    
-    // write chain of given bytes to output with sync scheme for data capturing of ADG1414
-    if (valueComplete) {
-      if (inputValue > 0 && inputValue < MAX_DATA_LENGTH) {
-        // switch to given chamber
-        writeDaisyChain();
-        // tell HF2 what chamber via DIO lines
-        writeHf2DioLines(data[0]);
-      }
-      else {
-        DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-#endif
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-// ---------------------------------------------------------------------------------------------------------------------------------------------
-  
-  else if (inputCommand == "setelectrodes") {
-    /* Define the chambers/electrodes to be selected during one switching scheme started by the command \'start\'.
-     * E.g. \'setelectrodes 2 AB10125CD10125\r' will specify two chambers to be stored and can then be selected
-     * The last part of the command is interpreted as bytes accordingly:
-     *  - 2 bytes active switches
-     *  - 1 byte for HF2 DIO line coding
-     *  - 4 bytes waiting time in us after the chamber was selected (max. 1.19 h).
-     * This scheme of 7 bytes is repeated for each chamber in the list (max. 390 bytes for 15 chambers with two pairs of electrodes).
-     * The command 'start' start the selecting scheme and the command 'stop' stops it. 
-     * 
-     * NOTE: Size of the data capturing array is limited to 512 bytes.
-     * NOTE: The 390 bytes are dynamically reserved, which means they should be still available after compiling!!!
-     */
 
+// -----------------------------------------------------------------------------
+      // check for valid command
+      if (!strcmp(commandString, "camera")) {
 
-    // calc incrementers and offsets for easy counting
-    unsigned short inc            = DIO_LINE_BYTES + SWITCH_BYTES + INTERVAL_BYTES;
-    unsigned short dioOffset      = SWITCH_BYTES;
-    unsigned short intervalOffset = DIO_LINE_BYTES + SWITCH_BYTES;
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
 
-    unsigned int inDioIdx;
-    unsigned int inByteIdx;
-    unsigned int inResIdx;
-
-    unsigned long valBuf;
-
-    if (valueComplete) {
-      if (inputValue > 0 && inputValue < MAX_DATA_LENGTH/inc) {
-
-//        // stop timer ... otherwise data structure might be messed up
-//        startMeas = false;
-        
-        // check if old data is available, delete it first
-        if (userSwitchingScheme != NULL) {
-          delete [] userSwitchingScheme;
-          userSwitchingScheme = NULL;
-          chamberIdx = 0;
-          numSwitchingSchemes = 0;
+        if (sscanf(valueString, "%d", &value)) {
+          if (value) {
+            triggerCamera = true;
+          }
+          else {
+            triggerCamera = false;
+          }
         }
-        
-        // allocate array with given size for storing bytes accordingly
-        userSwitchingScheme = new struct SwitchingScheme[inputValue];
-        
-        // only proceed if sucessfully allocated
-        if (userSwitchingScheme != NULL) {
-          
-          // update number of electrode pairs, if successful
-          numSwitchingSchemes = inputValue;
-          
-          // store bytes for each chamber setup accordingly
-          for (chamberIdx = 0; chamberIdx < numSwitchingSchemes; ++chamberIdx) {
+        else {
+          Serial.println("ERROR: Number expected after command.");
+        }
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "debug")) {
 
-            inByteIdx = chamberIdx*inc;
-            inDioIdx  = chamberIdx*inc + dioOffset;
-            inResIdx  = chamberIdx*inc + intervalOffset;
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
+
+        if (sscanf(valueString, "%d", &value)) {
+          if (value) {
+            debugMode = true;
+            Serial.println("Debug mode ON");
+          }
+          else {
+            Serial.println("Debug mode OFF");
+            debugMode = false;
+          }
+        }
+        else {
+          Serial.println("ERROR: Number expected after command.");
+        }
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "getversion")) {
+        Serial.println("Arduino Uno, ArduinoHandler V0.5");
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "help")) {
+        // print all available commands
+        Serial.println("List of all available commands:\n camera x\n debug x\n getversion\n help\n setelectrodes n 0x00\n setdio x\n setframerate x\n start\n stop\n test\n tilt\n tilter x\n");
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "setelectrodes")) {
+        /* Define the chambers/electrodes to be selected during one switching scheme started by the command \'start\'.
+         * E.g. \'setelectrodes 2 AB10125CD10125\r' will specify two chambers to be stored and can then be selected
+         * The last part of the command is interpreted as bytes accordingly:
+         *  - 2 bytes active switches
+         *  - 1 byte for HF2 DIO line coding
+         *  - 4 bytes waiting time in us after the chamber was selected (max. 1.19 h).
+         * This scheme of 7 bytes is repeated for each chamber in the list (max. 390 bytes for 15 chambers with two pairs of electrodes).
+         * The command 'start' start the selecting scheme and the command 'stop' stops it. 
+         * 
+         * NOTE: Size of the data capturing array is limited to 512 bytes.
+         * NOTE: The 390 bytes are dynamically reserved, which means they should be still available after compiling!!!
+        */
+        
+        
+        // calc incrementers and offsets for easy counting
+        uint8_t dioOffset      = SWITCH_BYTES;
+        uint8_t intervalOffset = DIO_LINE_BYTES + SWITCH_BYTES;
+    
+        uint16_t inDioIdx;
+        uint16_t inByteIdx;
+        uint16_t inResIdx;
+    
+        uint32_t valBuf;
+
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
+
+        if (sscanf(valueString, "%d", &value)) {
+          if ( value > 0 && value < ( MAX_DATA_LENGTH / CHAMBER_BYTE_STREAM_LEN ) ) {
+    
+            // stop timer ... otherwise data structure might be messed up
+            // just enable when you encounter problems
+            // does not allow you to switch electrode pairs while timer is enabled
+            // could be fixed by another variable that stores the initial value and rewrites it at the end of this function
+            //startMeas = false;
             
-            // first bytes for the switches
-            for (byteIdx = 0; byteIdx < SWITCH_BYTES; ++byteIdx) {
-              userSwitchingScheme[chamberIdx].activeSwitches[byteIdx] = (unsigned short)(data[inByteIdx+byteIdx]);
+            // check if old data is available, delete it first
+            if (userSwitchingScheme != NULL) {
+              delete [] userSwitchingScheme;
+              
+              userSwitchingScheme = NULL;
+              chamberIdx          = 0;
+              numSwitchingSchemes = 0;
             }
             
-            // DIO lines are always stored after the switch bytes
-            userSwitchingScheme[chamberIdx].hf2DioByte = data[inDioIdx];
-
-            // make sure nothing strange is in the memory
-            userSwitchingScheme[chamberIdx].chamberInterval = 0;
+            // allocate array with given size for storing bytes accordingly
+            userSwitchingScheme = new struct SwitchingScheme[value];
             
-            // multiplying with pow is too imprecise
-            for (byteIdx = 0; byteIdx < 4; ++byteIdx) {
-              valBuf = data[inResIdx+byteIdx];
-              
-              for (unsigned short shiftIdx = 0; shiftIdx < 3-byteIdx; ++shiftIdx) {
-                valBuf = (valBuf << 8);
+            // only proceed if sucessfully allocated
+            if (userSwitchingScheme != NULL) {
+            
+              // update number of electrode pairs, if successful
+              numSwitchingSchemes = value;
+
+              // calculate byte stream offset, so where in the whole data stream start the byte stream
+              // NOTE: since valueString points to the beginning of the string we need to add the lenght and +1 cause there is a space character
+              uint8_t byteStreamOffset = valueString - data + strlen(valueString) + 1;
+            
+              // store bytes for each chamber setup accordingly
+              for (chamberIdx = 0; chamberIdx < numSwitchingSchemes; ++chamberIdx) {
+    
+                inByteIdx = byteStreamOffset + chamberIdx * CHAMBER_BYTE_STREAM_LEN;
+                inDioIdx  = byteStreamOffset + chamberIdx * CHAMBER_BYTE_STREAM_LEN + dioOffset;
+                inResIdx  = byteStreamOffset + chamberIdx * CHAMBER_BYTE_STREAM_LEN + intervalOffset;
+                
+                // first bytes for the switches
+                for (byteIdx = 0; byteIdx < SWITCH_BYTES; ++byteIdx) {
+                  userSwitchingScheme[chamberIdx].activeSwitches[byteIdx] = (uint8_t)(data[inByteIdx+byteIdx]);   // max 255 switches possible
+                }
+                
+                // DIO lines are always stored after the switch bytes
+                userSwitchingScheme[chamberIdx].hf2DioByte = data[inDioIdx];
+    
+                //Serial.println(data[inDioIdx]);
+    
+                // make sure nothing strange is in the memory
+                userSwitchingScheme[chamberIdx].chamberInterval = 0;
+                
+                // multiplying with pow is too imprecise
+                for (byteIdx = 0; byteIdx < INTERVAL_BYTES; ++byteIdx) {
+                  valBuf = data[inResIdx+byteIdx];
+                  
+                  for (uint8_t shiftIdx = 0; shiftIdx < INTERVAL_BYTES-byteIdx-1; ++shiftIdx) {
+                    valBuf = (valBuf << 8);
+                  }
+                  userSwitchingScheme[chamberIdx].chamberInterval += valBuf;
+                }
               }
-              userSwitchingScheme[chamberIdx].chamberInterval += valBuf;
+            
+            // select the first chamber right away
+            chamberIdx = 0;
+            writeDaisyChain();
+            updateHf2DioLines(userSwitchingScheme[chamberIdx].hf2DioByte);
+            }
+            else {
+            Serial.println("ERROR: Could not allocate memory for storing switching scheme!");
             }
           }
-          
-          // select the first chamber right away
+          else {
+            DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
+          }
+        }
+        else {
+          DEBUG_PRINT("ERROR: Number expected after command.");
+        }
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "setdio")) {
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
+
+        if (sscanf(valueString, "%d", &value)) {
+        // sets dio line pins to HF2
+          updateHf2DioLines(value);
+        }
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "setframerate")) {
+        // 'setframerate 20' triggers ThorLabs DCC1240C camera 20 times per second
+        
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
+
+        if (sscanf(valueString, "%d", &value)) {
+          if (value) {
+            cameraFrameRate = value;
+            cameraTimeFrame = 1e6/cameraFrameRate;    // how many microseconds
+            
+            DEBUG_PRINT("Camera frame rate " + String(cameraFrameRate));
+          }
+          else {
+            DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
+          }
+        }
+        else {
+          DEBUG_PRINT("ERROR: Number expected after command.");
+        }
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "start")) {
+        // Start switching chambers (with camera triggering and/or tilting, depending on the setup).
+    
+        startMeas = true;
+        
+        // select the first chamber
+        if (chamberIdx != 0) {
           chamberIdx = 0;
           writeDaisyChain();
           updateHf2DioLines(userSwitchingScheme[chamberIdx].hf2DioByte);
         }
-        else {
-          Serial.println("ERROR: Could not allocate memory for storing switching scheme!");
+        
+        // start timers...
+        startTimerCamera = micros();
+        startTimerDaisy  = startTimerCamera;
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "stop")) {
+        // Stop switching chambers (including camera and tilter triggering).
+        startMeas = false;
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "test")) {
+        for (int blinkCnt = 0; blinkCnt < 5; ++blinkCnt) {
+          blinkingScheme();
+        }
+        // throw user info
+        Serial.println("Info: Test was executed.");
+      }
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "tilt")) {
+        // execute a single trigger pulse to tilt platform
+        if (tiltPlatform) {
+          TILTING_TRIGGER_PULSE;
         }
       }
-      else {
-        DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-  
-  else if (inputCommand == "setframerate") {
-    // 'setframerate 20' triggers ThorLabs DCC1240C camera 20 times per second
-    
-    if (valueComplete) {
-      if (inputValue) {
-        cameraFrameRate = inputValue;
-        cameraTimeFrame = 1e6/cameraFrameRate;    // how many microseconds
+// -----------------------------------------------------------------------------
+      else if (!strcmp(commandString, "tilter")) {
+        /* Specify if a tilter is connected.
+        * Call \'tilter 1\' to indicate a tilter is connected and needs to be triggered.
+        * Call \'tilter 0\' to virtually unplug the tilter (no more trigger pulses will be generated).
+        */
         
-        DEBUG_PRINT("Camera frame rate " + String(cameraFrameRate));
+        // cut value from stream
+        valueString = strtok( NULL, delimiter );
+
+        if (sscanf(valueString, "%d", &value)) {
+          if (value) {
+            tiltPlatform = true;
+          }
+          else {
+            tiltPlatform = false;
+          }
+        }
+        else {
+          DEBUG_PRINT("ERROR: Number expected after command.");
+        }
       }
-      else {
-        DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
+// -----------------------------------------------------------------------------
   }
-  
-  else if (inputCommand == "setdio") {
-    if (valueComplete) {
-      updateHf2DioLines(byte(inputValue));
-    }
-  }
-  
-  else if (inputCommand == "start") {
-    // Start switching chambers (with camera triggering and/or tilting, depending on the setup).
-
-    startMeas = true;
-    
-    // start timers...
-    startTimerCamera = micros();
-    startTimerDaisy  = startTimerCamera;
-  }
-
-  else if (inputCommand == "stop") {
-    // Stop switching chambers (including camera and tilter triggering).
-    startMeas = false;
-  }
-
-  else if (inputCommand == "tilt") {
-    // execute a single trigger pulse to tilt platform
-    if (tiltPlatform) {
-      TILTING_TRIGGER_PULSE;
-    }
-  }
-
-  else if (inputCommand == "tilter") {
-    /* Specify if a tilter is connected.
-     * Call \'tilter 1\' to indicate a tilter is connected and needs to be triggered.
-     * Call \'tilter 0\' to virtually unplug the tilter (no more trigger pulses will be generated).
-     */
-    
-    if (valueComplete) {
-      if (inputValue) {
-        tiltPlatform = true;
-      }
-      else {
-        tiltPlatform = false;
-      }
-    }
-    else {
-      DEBUG_PRINT("ERROR: Number expected after command.");
-    }
-  }
-
-//  // everything done, release lock
-//  lockCommand = false;
 }
 
 void writeDaisyChain() {
@@ -651,7 +569,7 @@ void writeDaisyChain() {
   // don't use for-loop it's too slow...
   
   swIdx = MAX_NUM_SWITCHES;
-  actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[1];
+  actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[1];     // change number here in case you want to add more switches
   
   // write zeros till switch
   while (--swIdx > actSwIdx) {
@@ -665,10 +583,8 @@ void writeDaisyChain() {
   DATA_OUT_HIGH;
   CLOCK_LOW;
   DATA_OUT_LOW;
-  // don't forget to increment clock
-//  --swIdx;
     
-  actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[0];
+  actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[0];     // also change here cause it's decrementing...
   // write zeros till switch
   while (--swIdx > actSwIdx) {
     CLOCK_HIGH;
@@ -681,10 +597,13 @@ void writeDaisyChain() {
   DATA_OUT_HIGH;
   CLOCK_LOW;
   DATA_OUT_LOW;
-  // don't forget to increment clock
-//  --swIdx;
+
+  ////////////////////////////////////////////////////
+  //          --- INSERT BLOCK HERE ---             //
+  //   IN CASE YOU WANT TO EXTEND ACTIVE SWITCHES   //
+  ////////////////////////////////////////////////////
   
-  // write zeros till switch
+  // write zeros till last switch index...no more active ones after that
   while (--swIdx > -1) {
     CLOCK_HIGH;
     CLOCK_LOW;
@@ -697,7 +616,10 @@ void writeDaisyChain() {
 }
 
 // set dio lines of HF2 according to chamber number as binary
-void updateHf2DioLines(byte chamber) {
+void updateHf2DioLines(uint8_t chamber) {
+  
+  Serial.println("chamber: " + String(chamber));
+  
   DIO_LINE_PORT = chamber & 0x1F;   // mask, only five bits are used
 }
 
@@ -735,3 +657,4 @@ void writeSPI(int slavePin, byte command){
       SPI.endTransaction();
       delay(1);
 }*/
+
