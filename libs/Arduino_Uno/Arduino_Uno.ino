@@ -293,11 +293,11 @@ void serialEvent() {
       // valid stream so we can check for the command
       if (commandComplete) {
         
-        Serial.println("Received command: " + String(commandString));
+//        Serial.println("Received command: " + String(commandString));
         
-        for (int blinkCnt = 0; blinkCnt < 5; ++blinkCnt) {
-          blinkingScheme();
-        }
+//        for (int blinkCnt = 0; blinkCnt < 5; ++blinkCnt) {
+//          blinkingScheme();
+//        }
 
 // -----------------------------------------------------------------------------
       // check for valid command
@@ -618,7 +618,7 @@ void writeDaisyChain() {
 // set dio lines of HF2 according to chamber number as binary
 void updateHf2DioLines(uint8_t chamber) {
   
-  Serial.println("chamber: " + String(chamber));
+//  Serial.println("chamber: " + String(chamber));
   
   DIO_LINE_PORT = chamber & 0x1F;   // mask, only five bits are used
 }

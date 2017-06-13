@@ -832,7 +832,7 @@ class ParaLyzerApp(Logger, StatusBar):
         tVar   = event.widget.get()
         result = ''
         
-        if any([k in key for k in ['cnti', 'viai', 'cntofa', 'viaofa', 'ppa', 'npa']]):
+        if any([k in key for k in ['cnti', 'viai', 'cntofa', 'viaofa']]):#, 'ppa', 'npa']]):
             
             timeBase = self.optm_vals['cbt'].get()
             
@@ -897,7 +897,7 @@ class ParaLyzerApp(Logger, StatusBar):
         elif 'cntofa' in key:
             enable = ( ('via' or 'usr') not in rbtn_sel and (ofa_ckbtn == 1 or swt_ckbtn == 1) )
         elif 'viaofa' in key:
-            enable = ( ('cnt' or 'usr') not in rbtn_sel and scv_ckbtn != 1 and ofa_ckbtn == 1 and swt_ckbtn != 1 )
+            enable = ( ('cnt' or 'usr') not in rbtn_sel and scv_ckbtn != 1 and (ofa_ckbtn == 1 or swt_ckbtn == 1) )
             
         return enable
         
@@ -969,7 +969,7 @@ class ParaLyzerApp(Logger, StatusBar):
             self.UpdateLeftStatus ( self.paraLyzerCore.hf2.GetCurrentStreamFolder() )
             self.UpdateMidStatus  ( (now-sTime).__str__()                           )
             self.UpdateRightStatus( self.paraLyzerCore.hf2.GetRecordingString()     )
-            print(self.paraLyzerCore.arduino.comPort.read(self.paraLyzerCore.arduino.comPort.in_waiting))
+#            print(self.paraLyzerCore.arduino.comPort.read(self.paraLyzerCore.arduino.comPort.in_waiting))
             
             sleep(1)
         
@@ -1010,7 +1010,7 @@ class ParaLyzerApp(Logger, StatusBar):
                             self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['cnti'])
                             
                             # in case it's needed by SetupArduino for delay events
-                            self.streamFlags['switchDelay'] = tNums['cnti']
+                            self.streamFlags['switchDelay'] = 10#tNums['cnti']
                             
                         # process viability interval
                         if 'viai' in tNums.keys():

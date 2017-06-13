@@ -169,8 +169,8 @@ class Hf2Core(CoreDevice):
             self._recordString = 'Recording...'
             
             
-            self._debugThread = threading.Thread(target=self.DebugDioThread)
-            self._debugThread.start()
+#            self._debugThread = threading.Thread(target=self.DebugDioThread)
+#            self._debugThread.start()
         
         return success
         
@@ -183,7 +183,7 @@ class Hf2Core(CoreDevice):
             self._poll = False
             # end poll thread
             self._pollThread.join()
-            self._debugThread.join()
+#            self._debugThread.join()
             
             # write last part of the data to disk
             self.WriteMatFileToDisk()

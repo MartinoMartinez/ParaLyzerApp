@@ -196,9 +196,9 @@ class ParaLyzerCore(Logger):
                 
                 if 'swt' in flags:
                     if flags['swt']:
-                        self.tilter.SetTilterEvent( 'onPosUp'  , lambda flags=flags: self.arduino.SetupArduino(**flags) )
+                        self.tilter.SetTilterEvent( 'onPosUp'  , lambda : self.arduino.SetupArduino(cnti=True, viai=False) )
                         flags.update(cnti=False, viai=True)
-                        self.tilter.SetTilterEvent( 'onNegWait', lambda flags=flags: self.arduino.SetupArduino(**flags), delay=flags['switchDelay'] )
+                        self.tilter.SetTilterEvent( 'onNegWait', lambda : self.arduino.SetupArduino(cnti=False, viai=True), delay=flags['switchDelay'] )
                     else:
                         self.tilter.UnsetTilterEvent( 'onPosUp'   )
                         self.tilter.UnsetTilterEvent( 'onNegWait' )
@@ -256,9 +256,15 @@ class ParaLyzerCore(Logger):
         
         ePairs       = []
         
-        collectFirst = not flags.get( 'perChamber', True  )
+        collectFirst = not flags.get( 'perChamber', False )
         collectCnt   =     flags.get( 'cnti'      , False )
         collectVia   =     flags.get( 'viai'      , False )
+        
+        print('collectFirst: %s' % collectFirst)
+        print('collectCnt: %s' % collectCnt)
+        print('collectVia: %s' % collectVia)
+        print('flags in SelectElectrodePairs %s: %s' % (__name__, flags))
+        print('definedElectrodePairs in SelectElectrodePairs %s: %s' % (__name__, definedElectrodePairs))
         
         # pre-sort dictionary
         # since dicts use string keys, sort doesn't work properly
@@ -298,6 +304,8 @@ class ParaLyzerCore(Logger):
             for key in dummyList:
                 ePairs.append( definedElectrodePairs[key] )
                 
+        print('ePairs in SelectElectrodePairs %s: %s' % (__name__, ePairs))
+        
         return ePairs
         
         

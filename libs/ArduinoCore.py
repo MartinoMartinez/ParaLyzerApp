@@ -139,12 +139,12 @@ class ArduinoCore(CoreDevice):
             success = self.SafeWriteToComPort(msg.encode('latin-1'), leaveOpen=True)
             
             
-#            if success:
-#                if self._debugMode:
-#                    
-#                    inMsg = self.SafeReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
-#                    
-#                    self.logger.debug('Received message from Arduino: %s' % inMsg)
+            if success:
+                if self._debugMode:
+                    
+                    inMsg = self.SafeReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
+                    
+                    self.logger.debug('Received message from Arduino: %s' % inMsg)
                         
         return success
     
@@ -155,6 +155,7 @@ class ArduinoCore(CoreDevice):
         
         # init return value
         switchesToActivate = []
+        oldFileType = False
         
         if isinstance(activeElectrodePair, str):
             
@@ -170,15 +171,20 @@ class ArduinoCore(CoreDevice):
                 pads = self._chipConfig['chamberToPad'][padIdx]
                 # stop loop when correct electrode pair setup was found
                 # use pads in subsequent code
-                if pads['ePairId'] == activeElectrodePair:
-                    break
+                if 'ePairId' in pads.keys():
+                    if pads['ePairId'] == activeElectrodePair:
+                        break
+                    else:
+                        padIdx += 1
+                # probably old file type .. use number as index to access pads
                 else:
-                    padIdx += 1
+                    oldFileType = True
+                    break
                 
             # in case loop left withput any results
             # e.g. an old file setup was used
             # just use the given variable as index
-            if padIdx == len(self._chipConfig['chamberToPad']):
+            if oldFileType:
                 pads = self._chipConfig['chamberToPad'][activeElectrodePair]
             
             self.logger.debug('pads: %s' % pads)
@@ -262,6 +268,8 @@ class ArduinoCore(CoreDevice):
         sendStream = []
 
         ePairs = self.SelectElectrodePairs(selectFunc, **flags)
+            
+        print(ePairs)
         
         if len(ePairs) == 0:
             success = False
@@ -286,10 +294,10 @@ class ArduinoCore(CoreDevice):
         if success:
             
             # enable/disable debug for Arduino
-#            if self._debugMode:
-#                success = self.SendMessage('debug 1')
-#            else:
-#                success = self.SendMessage('debug 0')
+            if self._debugMode:
+                success = self.SendMessage('debug 1')
+            else:
+                success = self.SendMessage('debug 0')
                     
             
             # check if something is in stream
@@ -465,7 +473,14 @@ def MySelectElectrodePairFunctionWithFlags(definedElectrodePairs, **flags):
         selectedElectrodePairs.reverse()
     
     return selectedElectrodePairs
-    
+            
+            
+            
+###############################################################################
+###############################################################################
+###                      --- YOUR CODE HERE ---                             ###
+###############################################################################
+###############################################################################
 
 if __name__ == '__main__':
     
@@ -500,8 +515,13 @@ if __name__ == '__main__':
 #    arduino.comPort.open()
 #    arduino.comPort.write(msg.encode('latin-1'))
 
-    for i in range(30):
-        arduino.DefineElectrodePair(i, 1e6)
+#    for i in range(30):
+#        arduino.DefineElectrodePair(i, 1e6)
+
+    arduino.UpdateConfig(chipConfig='./cfg/ChipConfigSeb.json')
+
+    arduino.DefineElectrodePair(0, 1e3)
+    arduino.DefineElectrodePair(2, 1e3)
         
     arduino.SetupArduino()
     
@@ -516,7 +536,7 @@ if __name__ == '__main__':
     arduino.Start()
     
     sT = time()
-    while time()-sT < 40:
+    while time()-sT < 5:
         print(arduino.comPort.read(arduino.comPort.in_waiting))
         sleep(.5)
     

@@ -249,7 +249,6 @@ class ComDevice:
         success = False
         
         if self.comPortStatus:
-            
             # wait until reading/writing was finished
             # or the port is opened/closed by somebody else
             while self._isReadingWriting or self._isAboutToOpenClose:

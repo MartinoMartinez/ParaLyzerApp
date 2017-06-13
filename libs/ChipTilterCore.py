@@ -81,30 +81,30 @@ class ChipTilterCore(CoreDevice):
     def __init__(self, **flags):
         
         # to stop while loop for reading tilter stream
-        self.isReading       = False
-        self.inMessageThread = None
-        
-        self.isTilting = False
+        self._isReading       = False
+        self._inMessageThread = None
+        self._isTilting       = False
+        self._eventThreads    = {}          # contains a list of event threads that are started in parallel
         
         # structure with default values
-        self.setup = self.GetDefaultSetup()
+        self._setup = self._GetDefaultSetup()
         
-        self.resetStream = self.GetResetStream()
+        self._resetStream = self._GetResetStream()
         
         # in case multiple setups have to be written
-        self.setups = []
+        self._setups = []
         
         # list for messages received from the tilter
-        self.inMessageQueue = []
+        self._inMessageQueue = []
         
         # for counting the performed cycles and detecting the position
-        self.tilterState = self.GetDefaultTilterState()
+        self._tilterState = self._GetDefaultTilterState()
         
         # define tilting events
         # internally handled as list to enable multiple function calls for one event (see SetEventHandler)
-        self.tilterEvents = self.GetDefaultEventDescriptors()
+        self._tilterEvents = self._GetDefaultEventDescriptors()
         
-        self.currentParameterSet = self.GetDefaultParameterSet()
+        self._currentParameterSet = self._GetDefaultParameterSet()
         
         
         flags['initAfterDetectFunc'] = self.StartInMessageThread
@@ -154,7 +154,7 @@ class ChipTilterCore(CoreDevice):
     def ConvertSetupToStream(self, key, val):
         
         if val != -1:
-            self.setup['byteStream'].append( self.GenerateByteStream(key, val) )
+            self._setup['byteStream'].append( self.GenerateByteStream(key, val) )
         
 ### -------------------------------------------------------------------------------------------------------------------------------
 
@@ -172,7 +172,7 @@ class ChipTilterCore(CoreDevice):
         success = True
         
         if not byteStream:
-            byteStream = self.setup['byteStream']
+            byteStream = self._setup['byteStream']
         
         if self.SafeOpenComPort():
             
@@ -195,7 +195,7 @@ class ChipTilterCore(CoreDevice):
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetResetStream(self):
+    def _GetResetStream(self):
         
         stream = []
         
@@ -212,7 +212,7 @@ class ChipTilterCore(CoreDevice):
 ### -------------------------------------------------------------------------------------------------------------------------------
 
     def ResetTilterSetup(self, mode='normal'):
-        return self.WriteSetup(self.resetStream, mode)
+        return self.WriteSetup(self._resetStream, mode)
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
@@ -250,9 +250,9 @@ class ChipTilterCore(CoreDevice):
         if self.SafeOpenComPort():
             
             # reset tilter state for new run
-            self.tilterState = self.GetDefaultTilterState()
+            self._tilterState = self._GetDefaultTilterState()
             
-            while self.isReading:
+            while self._isReading:
                 
                 # after splitting last entry in list is always emtpy, if character was in stream
                 # check for this, otherwise wait for new input
@@ -264,7 +264,7 @@ class ChipTilterCore(CoreDevice):
                 # there must be something wrong with the serial port
                 # kill task...
                 elif not self.comPortStatus:
-                    self.isReading = False
+                    self._isReading = False
                         
             
                 # message are sent every 2s by the tilter
@@ -278,9 +278,9 @@ class ChipTilterCore(CoreDevice):
     def HandleInMessageQueue(self, msg):
         
         # store for later handling, if no delimiter was found
-        self.inMessageQueue.append(msg)
+        self._inMessageQueue.append(msg)
         
-        msgStr = ''.join(self.inMessageQueue)
+        msgStr = ''.join(self._inMessageQueue)
         
         # is '#' in stream? -> complete message
         if '#' in msgStr:
@@ -288,94 +288,100 @@ class ChipTilterCore(CoreDevice):
             # in case multiple readings where necessary flatten list to string
             # split again at correct positions with '#'
             # also multiple messages can be handled
-            self.inMessageQueue = msgStr.split('#')
+            self._inMessageQueue = msgStr.split('#')
             
-            while len(self.inMessageQueue) != 0:
+            while len(self._inMessageQueue) != 0:
                 
                 # get first message
-                msg = self.inMessageQueue.pop(0)
+                msg = self._inMessageQueue.pop(0)
                 
                 # read parameter values from last message and fill variable
-                self.ExtractParameters(msg)
+                self._ExtractParameters(msg)
                 
                 # check pause time
-                if self.currentParameterSet['p'] > 0:
+                if self._currentParameterSet['p'] > 0 and self._currentParameterSet['m'] == 0:
                     
                     # only then update the waiting position
-                    if not self.tilterState['isWaiting']:
+                    if not self._tilterState['isWaiting']:
                         # first wait is on positive side
-                        if not self.tilterState['posWait']:
-                            self.tilterState['posWait'] = True
+                        if not self._tilterState['posWait']:
+                            self._tilterState['posWait'] = True
                             
-                            self.EventHandler('onPosWait')
+                            self._EventHandler('onPosWait')
                         
                         # then on the negative side
-                        elif self.tilterState['posWait']:
-                            self.tilterState['posWait'] = False
-                            self.tilterState['negWait'] = True
+                        elif self._tilterState['posWait']:
+                            self._tilterState['posWait'] = False
+                            self._tilterState['negWait'] = True
 
-                            self.EventHandler('onNegWait')
+                            self._EventHandler('onNegWait')
                             
-                        self.tilterState['isMoving']  = False
-                        self.tilterState['isWaiting'] = True
+                        self._tilterState['isMoving']  = False
+                        self._tilterState['isWaiting'] = True
+
+                        print('isWaiting')
                         
                 # check motion time
-                if self.currentParameterSet['m'] > 0:
+                elif self._currentParameterSet['m'] > 0 and self._currentParameterSet['p'] == 0:
                     
                     # only then update the moving direction
-                    if not self.tilterState['isMoving']:
+                    if not self._tilterState['isMoving']:
                         # start with the first movement -> always the positive angle
-                        if not any( [self.tilterState['posDown'], self.tilterState['posUp'], self.tilterState['negDown'], self.tilterState['negUp']] ):
-                            self.tilterState['posDown'] = True
+                        if not any( [self._tilterState['posDown'], self._tilterState['posUp'], self._tilterState['negDown'], self._tilterState['negUp']] ):
+                            self._tilterState['posDown'] = True
 
-                            self.EventHandler('onPosDown')
+                            self._EventHandler('onPosDown')
                         
                         # return from waiting on positive side
-                        elif self.tilterState['posDown']:
-                            self.tilterState['posDown'] = False
-                            self.tilterState['posUp']   = True
+                        elif self._tilterState['posDown']:
+                            self._tilterState['posDown'] = False
+                            self._tilterState['posUp']   = True
 
-                            self.EventHandler('onPosUp')
+                            self._EventHandler('onPosUp')
                         
                         # return from waiting on negative side
-                        elif self.tilterState['negDown']:
-                            self.tilterState['negDown'] = False
-                            self.tilterState['negUp']   = True
+                        elif self._tilterState['negDown']:
+                            self._tilterState['negDown'] = False
+                            self._tilterState['negUp']   = True
 
-                            self.EventHandler('onNegUp')
+                            self._EventHandler('onNegUp')
                             
                     
                         # update states
-                        self.tilterState['isMoving']  = True
-                        self.tilterState['isWaiting'] = False
+                        self._tilterState['isMoving']  = True
+                        self._tilterState['isWaiting'] = False
+
+                        print('isMoving')
                             
                     # there might be a transition from up to down if there's not horizontal waiting...
                     # can be detected if the new time if larger than the old one
-                    elif self.tilterState['isMoving'] and self.currentParameterSet['m'] > self.tilterState['moveTime']:
+                    elif self._tilterState['isMoving'] and self._currentParameterSet['m'] > self._tilterState['moveTime']:
                         
                         # transition from posUp to negDown
-                        if self.tilterState['posUp']:
-                            self.tilterState['posUp']   = False
-                            self.tilterState['negDown'] = True
+                        if self._tilterState['posUp']:
+                            self._tilterState['posUp']   = False
+                            self._tilterState['negDown'] = True
 
-                            self.EventHandler('onNegDown')
+                            self._EventHandler('onNegDown')
                         
                         # transition from negUp to posDown
                         # also we have a full cycle
-                        elif self.tilterState['negUp']:
-                            self.tilterState['negUp']      = False
-                            self.tilterState['posDown']    = True
-                            self.tilterState['numCycles'] += 1
+                        elif self._tilterState['negUp']:
+                            self._tilterState['negUp']      = False
+                            self._tilterState['posDown']    = True
+                            self._tilterState['numCycles'] += 1
 
-                            self.EventHandler('onPosDown')
+                            self._EventHandler('onPosDown')
+                            
+                        print('transition')
                         
 
                     # set new 'old' value for next comparision
-                    self.tilterState['moveTime']  = self.currentParameterSet['m']
+                    self._tilterState['moveTime']  = self._currentParameterSet['m']
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def ExtractParameters(self, msg):
+    def _ExtractParameters(self, msg):
         
         for key in self.__parameters__:
             paramSet = msg.split(';')
@@ -388,43 +394,56 @@ class ChipTilterCore(CoreDevice):
                     except ValueError:
                         self.logger.error('Could not extract number from %s' % val)
                     else:
-                        self.currentParameterSet[key] = val
+                        self._currentParameterSet[key] = val
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def EventHandler(self, event):
+    def _EventHandler(self, event):
+        
+#        print('event in EventHandler: %s' % event)
         
         # call user defined function
-        if self.tilterEvents[event]['defined']:
+        if self._tilterEvents[event]['defined']:
             
-            for funcIdx in range(self.tilterEvents[event]['numFuncs']):
+            for funcIdx in range(self._tilterEvents[event]['numFuncs']):
             
                 # increment iteration counter
-                self.tilterEvents[event]['itercnt'][funcIdx] += 1
+                self._tilterEvents[event]['itercnt'][funcIdx] += 1
 
-                if self.tilterEvents[event]['itercnt'][funcIdx] == self.tilterEvents[event]['iter'][funcIdx]:
+                if self._tilterEvents[event]['itercnt'][funcIdx] == self._tilterEvents[event]['iter'][funcIdx]:
                     
                     # callback function
-                    # if delay is zero, directly call callback
-                    if self.tilterEvents[event]['delay'][funcIdx] == 0:
-                        self.tilterEvents[event]['cb'][funcIdx]()
-                    # otherwise use DelayEvent
-                    else:
-                        self.eventThread = threading.Thread(target=lambda event=event, func=funcIdx: self.DelayEvent(event, func))
-                        self.eventThread.start()
-                        self.eventThread.join()
+                    # push all event function to another thread
+                    # NOTE: use dictionary to store different threads and access them later to join
+                    eventKey = '%s%s' % (event, funcIdx)
+                    
+                    # so first try to join it
+                    if eventKey in self._eventThreads.keys() and self._eventThreads[eventKey]:
+                        self._eventThreads[eventKey].join()
+                        
+                    self._eventThreads[eventKey] = threading.Thread( target=lambda event=event, func=funcIdx: self._DelayEvent(event, func) )
+                    self._eventThreads[eventKey].start()
+#                    
+#                    # if delay is zero, directly call callback
+#                    if self._tilterEvents[event]['delay'][funcIdx] == 0:
+#                        self._tilterEvents[event]['cb'][funcIdx]()
+#                    # otherwise use DelayEvent
+#                    else:
+#                        self._eventThread.update( { = )
+#                        self._eventThread.start()
+#                        self._eventThread.join()
                     
                     
                     # reset iteration counter
-                    self.tilterEvents[event]['itercnt'][funcIdx] = 0
+                    self._tilterEvents[event]['itercnt'][funcIdx] = 0
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def DelayEvent(self, event, func):
+    def _DelayEvent(self, event, func):
         # wait for delay
-        sleep(self.tilterEvents[event]['delay'][func])
+        sleep(self._tilterEvents[event]['delay'][func])
         # execute after waiting time
-        self.tilterEvents[event]['cb'][func]()
+        self._tilterEvents[event]['cb'][func]()
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
@@ -442,12 +461,12 @@ class ChipTilterCore(CoreDevice):
             if self.SafeOpenComPort():
                 
                 # try to start tilter
-                success = self.WriteStream( self.GenerateByteStream(self._addresses['status'], self._statusBits['startTilter']) )
+                success = self.WriteStream( self.GenerateByteStream(self.__addresses__['status'], self.__statusBits__['startTilter']) )
                     
                 self.SafeCloseComPort()
                 
                 if success:
-                    self.isTilting = True
+                    self._isTilting = True
                     self.logger.info('Started tilting.')
         
         return success
@@ -468,12 +487,12 @@ class ChipTilterCore(CoreDevice):
             if self.SafeOpenComPort():
                 
                 # try to stop tilter
-                success = self.WriteStream( self.GenerateByteStream(self._addresses['status'], self._statusBits['stopTilter']) )
+                success = self.WriteStream( self.GenerateByteStream(self.__addresses__['status'], self.__statusBits__['stopTilter']) )
                     
                 self.SafeCloseComPort()
                 
                 if success:
-                    self.isTilting = False
+                    self._isTilting = False
                     self.logger.info('Stopped tilting.')
             
         return success
@@ -489,11 +508,11 @@ class ChipTilterCore(CoreDevice):
 #            sleep(30e-3)
             
             # initialize new thread
-            self.inMessageThread = threading.Thread(target=self.ReadStream)
+            self._inMessageThread = threading.Thread(target=self.ReadStream)
             # once message thread is started loop is running till StopTilter() was called
-            self.isReading = True
+            self._isReading = True
             # start parallel thread
-            self.inMessageThread.start()
+            self._inMessageThread.start()
             
     
 ### -------------------------------------------------------------------------------------------------------------------------------
@@ -501,15 +520,15 @@ class ChipTilterCore(CoreDevice):
     def StopInMessageThread(self):
                 
         # to stop while loop for reading tilter stream
-        self.isReading = False
+        self._isReading = False
         
         if self.comPort:
             while self.comPort.isOpen():
                 sleep(1e-3)
         
-        if self.inMessageThread:
+        if self._inMessageThread:
             # join concurrent and main thread
-            self.inMessageThread.join()
+            self._inMessageThread.join()
                 
 ### -------------------------------------------------------------------------------------------------------------------------------
     #######################################################################
@@ -519,7 +538,7 @@ class ChipTilterCore(CoreDevice):
 
     def SetValue(self, key, val):
         
-        if key in self.setup.keys():
+        if key in self._setup.keys():
             
             if key not in ['byteStream', 'posPause', 'negPause', 'horPause', 'totTime']:
                 try:
@@ -530,19 +549,19 @@ class ChipTilterCore(CoreDevice):
                     if key in ['posAngle', 'negAngle', 'posMotion', 'negMotion'] and val < 1:
                         val = 1
                         
-                    self.setup.update        ( {key: val}                   )
+                    self._setup.update       ( {key: val}                   )
                     self.ConvertSetupToStream( self.__addresses__[key], val )
                     
             elif key in ['posPause', 'negPause', 'horPause', 'totTime']:
                 
-                self.setup.update( {key: val} )
+                self._setup.update( {key: val} )
                 
                 if key in ['posPause', 'negPause', 'horPause']:
                     
                     mins, secs = coreUtils.GetMinSecFromString(val)
                     
-                    self.setup.update( {'%sMin'%key: mins} )
-                    self.setup.update( {'%sSec'%key: secs} )
+                    self._setup.update( {'%sMin'%key: mins} )
+                    self._setup.update( {'%sSec'%key: secs} )
                     
                     self.ConvertSetupToStream( self.__addresses__['%sMin'%key], mins )
                     self.ConvertSetupToStream( self.__addresses__['%sSec'%key], secs )
@@ -551,8 +570,8 @@ class ChipTilterCore(CoreDevice):
                     
                     hrs, mins = coreUtils.GetMinSecFromString(val)
                     
-                    self.setup.update( {'%sHrs'%key: hrs}  )
-                    self.setup.update( {'%sMin'%key: mins} )
+                    self._setup.update( {'%sHrs'%key: hrs}  )
+                    self._setup.update( {'%sMin'%key: mins} )
                     
                     self.ConvertSetupToStream( self.__addresses__['%sHrs'%key], hrs  )
                     self.ConvertSetupToStream( self.__addresses__['%sMin'%key], mins )
@@ -561,8 +580,8 @@ class ChipTilterCore(CoreDevice):
 
     def GetValue(self, key):
             
-        if key in self.setup.keys():
-            return self.setup[key]
+        if key in self._setup.keys():
+            return self._setup[key]
         else:
             self.logger.error('%s not in setup' % key)
         
@@ -572,7 +591,7 @@ class ChipTilterCore(CoreDevice):
     def GetParameter(self, key):
             
         if key in self.__parameters__:
-            return self.currentParameterSet[key]
+            return self._currentParameterSet[key]
         else:
             self.logger.error('%s not in parameter set' % key)
         
@@ -580,11 +599,11 @@ class ChipTilterCore(CoreDevice):
 ### -------------------------------------------------------------------------------------------------------------------------------
 
     def GetParameters(self):
-        return self.currentParameterSet
+        return self._currentParameterSet
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetDefaultSetup(self):
+    def _GetDefaultSetup(self):
         return {
             'posAngle'   : -1,
             'negAngle'   : -1,
@@ -609,7 +628,7 @@ class ChipTilterCore(CoreDevice):
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetDefaultTilterState(self):
+    def _GetDefaultTilterState(self):
         return {
             'isMoving' : False,
             'posDown'  : False,
@@ -626,23 +645,23 @@ class ChipTilterCore(CoreDevice):
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetDefaultEventDescriptors(self):
+    def _GetDefaultEventDescriptors(self):
         
         d = {}
         
         for k in self.__supportedEvents__:
-            d.update( {k: self.GetDefaultEventDescriptor()} )
+            d.update( {k: self._GetDefaultEventDescriptor()} )
             
         return d
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetDefaultEventDescriptor(self):
+    def _GetDefaultEventDescriptor(self):
         return {'defined': False, 'numFuncs': 0, 'cb': [], 'iter': [], 'itercnt': [], 'delay': []}
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
-    def GetDefaultParameterSet(self):
+    def _GetDefaultParameterSet(self):
         
         d = {}
         
@@ -655,56 +674,58 @@ class ChipTilterCore(CoreDevice):
 
     def SetTilterEvent(self, event, cb, it=1, delay=0):
         
-        if event in self.tilterEvents.keys():
-            self.tilterEvents[event]['defined'] = True
+        print('event in SetTilterEvent: %s' % event)
+        
+        if event in self._tilterEvents.keys():
+            self._tilterEvents[event]['defined'] = True
             
             # append new function to list, if not already exists
-            if cb not in self.tilterEvents[event]['cb']:
-                self.tilterEvents[event]['cb'].append     ( cb    )
-                self.tilterEvents[event]['iter'].append   ( it    )
-                self.tilterEvents[event]['itercnt'].append( 0     )
-                self.tilterEvents[event]['delay'].append  ( delay )
+            if cb not in self._tilterEvents[event]['cb']:
+                self._tilterEvents[event]['cb'].append     ( cb    )
+                self._tilterEvents[event]['iter'].append   ( it    )
+                self._tilterEvents[event]['itercnt'].append( 0     )
+                self._tilterEvents[event]['delay'].append  ( delay )
                 # increment func counter
-                self.tilterEvents[event]['numFuncs'] += 1
+                self._tilterEvents[event]['numFuncs'] += 1
 
             # if already exist, update values
             else:
                 # find index of current callback in list
-                for idx in range(self.tilterEvents[event]['numFuncs']):
-                    if self.tilterEvents[event]['cb'][idx] == cb:
+                for idx in range(self._tilterEvents[event]['numFuncs']):
+                    if self._tilterEvents[event]['cb'][idx] == cb:
                         break
                     
-                self.tilterEvents[event]['iter'][idx]    = it
-                self.tilterEvents[event]['itercnt'][idx] = 0
-                self.tilterEvents[event]['delay'][idx]   = delay
+                self._tilterEvents[event]['iter'][idx]    = it
+                self._tilterEvents[event]['itercnt'][idx] = 0
+                self._tilterEvents[event]['delay'][idx]   = delay
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
     def UnsetTilterEvent(self, event, func=None):
         
-        if event in self.tilterEvents.keys():
+        if event in self._tilterEvents.keys():
             if func:
-                for idx in range(self.tilterEvents[event]['numFuncs']):
-                    if self.tilterEvents[event]['cb'][idx] == func:
-                        self.tilterEvents[event]['cb'].pop     ( idx )
-                        self.tilterEvents[event]['iter'].pop   ( idx )
-                        self.tilterEvents[event]['itercnt'].pop( idx )
-                        self.tilterEvents[event]['delay'].pop  ( idx )
+                for idx in range(self._tilterEvents[event]['numFuncs']):
+                    if self._tilterEvents[event]['cb'][idx] == func:
+                        self._tilterEvents[event]['cb'].pop     ( idx )
+                        self._tilterEvents[event]['iter'].pop   ( idx )
+                        self._tilterEvents[event]['itercnt'].pop( idx )
+                        self._tilterEvents[event]['delay'].pop  ( idx )
                         # decrement func counter
-                        self.tilterEvents[event]['numFuncs'] -= 1
+                        self._tilterEvents[event]['numFuncs'] -= 1
                         break
                         
-                if self.tilterEvents[event]['numFuncs'] == 0:
-                    self.tilterEvents[event]['defined'] = False
+                if self._tilterEvents[event]['numFuncs'] == 0:
+                    self._tilterEvents[event]['defined'] = False
                     
             # undefine all functions
             else:
-                self.tilterEvents[event] = self.GetDefaultEventDescriptor()
+                self._tilterEvents[event] = self._GetDefaultEventDescriptor()
     
 ### -------------------------------------------------------------------------------------------------------------------------------
 
     def IsTilting(self):
-        return self.isTilting
+        return self._isTilting
             
             
             
@@ -743,18 +764,18 @@ if __name__ == '__main__':
     ##############################
     
     # set positive motion time to 12 sec
-    tilter.SetValue('posMotion', 12)
+    tilter.SetValue('posMotion', 18)
     # set negative motion time to 15 sec
-    tilter.SetValue('negMotion', 12)
+    tilter.SetValue('negMotion', 18)
     
     #############################
     ### - SET PAUSE TIMINGS - ###
     #############################
     
     # set positive waiting time to 30 sec
-    tilter.SetValue('posPause', '15')
+    tilter.SetValue('posPause', 18)
     # set negative waiting time to 1:30
-    tilter.SetValue('negPause', '15')
+    tilter.SetValue('negPause', 18)
     
     
     ##############################
@@ -774,13 +795,17 @@ if __name__ == '__main__':
 #    ##############################
 #    
 #    # start tilting with current setup
-#    tilter.StartTilter()
+    tilter.StartTilter()
 #    
 #    # sleep for 10 seconds
-#    sleep(10)
+#    sleep(100)
 #    
-#    # stop tilting
-#    tilter.StopTilter()
+    try:
+        while True:
+            None
+    except KeyboardInterrupt:
+        # stop tilting
+        tilter.StopTilter()
     
     
 #    #################################
