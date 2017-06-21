@@ -12,6 +12,7 @@ from collections import deque
 
 import os
 import logging as log
+import scipy as sp
 import binascii
 import textwrap
 import json
@@ -216,6 +217,34 @@ def GetTextFromByteStream(bStream, group=2):
     else:
         return textwrap.wrap(binascii.b2a_hex(bStream).decode('latin-1'), group)
         
+### -------------------------------------------------------------------------------------------------------------------------------
+
+def DataGen(maxDemod=None, arraySize=None, maxElectrodePair=None):
+    
+    if maxDemod == None:
+        maxDemod = 6
+    if arraySize == None:
+        arraySize = 1000
+    if maxElectrodePair == None:
+        maxElectrodePair = 31
+    
+    data = {}
+    
+    # 1-6 demodulators
+    for demod in range(sp.random.randint(1,maxDemod+1)):
+        
+        key = 'dev10/demods/%s/sample/' % demod
+        
+        data[key] = {}
+        
+        data[key]['x']         = sp.random.random (             arraySize )
+        data[key]['y']         = sp.random.random (             arraySize )
+        data[key]['frequency'] = sp.random.randint( 100, 50e6 , arraySize )
+        data[key]['timestamp'] = sp.random.randint( 0  , 2**31, arraySize )
+        data[key]['dio']       = sp.array([int("{0:032b}".format(int("{0:05b}".format(i)[::-1], 2)<<20), 2) for i in sp.random.randint( 0, maxElectrodePair, arraySize )])
+        
+    return data
+
 ### -------------------------------------------------------------------------------------------------------------------------------
 
 def GetTotalSize(o, handlers={}, verbose=False):

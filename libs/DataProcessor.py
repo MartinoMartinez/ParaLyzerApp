@@ -7,7 +7,7 @@ Created on Sat Jun 17 00:42:53 2017
 
 import threading
 import queue
-import numpy as np
+import scipy as sp
 from collections import OrderedDict, defaultdict
 
 from time import sleep
@@ -36,6 +36,9 @@ class DataProcessor(threading.Thread):
         # gets processed in an ordered fashion in _DataProcessor
         self._newDataQueue = queue.Queue()
         
+        # thread condition to sleep while no data is available
+        self._newDataEvent = threading.Event()
+        
         # enable data procesor to run
         self._activeProcessor = True
         self.start()
@@ -44,11 +47,7 @@ class DataProcessor(threading.Thread):
                     
     def __del__(self):
         
-        # test if something is still in the pipe
-        # join waits until last task_done was called
-        self._newDataQueue.join()
-        # so here we're safe to kill the process loop
-        self._activeProcessor = False
+        self.Stop()
         
         # wait for process watcher
         self.join()
@@ -57,16 +56,16 @@ class DataProcessor(threading.Thread):
     
     def _DataProcessor(self):
         
-        gotX, gotY = False, False
-        
         # run as long as user puts new data
         while self._activeProcessor:
-            
+             
             # get next task from queue
             try:
                 _data = self._newDataQueue.get(block=False)
             except queue.Empty:
-                pass
+                # in case queue is empty wait for more data        
+                self._newDataEvent.clear()
+                self._newDataEvent.wait(timeout=1e-4)
             else:
                 
                 # estimate size
@@ -99,11 +98,11 @@ class DataProcessor(threading.Thread):
                     
                         # just copy if standard values
                         if key in ['timestamp', 'frequency', 'dio']:
-                            self._data[demod][key] = np.concatenate( [self._data[demod][key], data[key]] )
+                            self._data[demod][key] = sp.concatenate( [self._data[demod][key], data[key]] )
                         
                         # OR simple adding
                         elif key == 'ePairs':
-                            self._data[demod][key] += ePairs
+                            self._data[demod][key].extend(ePairs)
                             # and don't forget to update size
                             self._dataSize += coreUtils.GetTotalSize(ePairs)
                             
@@ -112,18 +111,18 @@ class DataProcessor(threading.Thread):
                             # slice x,y and others with given slice indices
                             for k,slices in sliceIdices.items():
                                 # get new np array in case electrode pairs was never used before
-                                if k is not self._data[demod][key].keys():
-                                    self._data[demod][key][k] = np.array([])
-                                
+                                if k not in self._data[demod][key].keys():
+                                    self._data[demod][key][k] = sp.array([])
+                                    
                                 # data that is originally there but needs to be sliced
                                 if key in data.keys():
-                                    self._data[demod][key][k] = np.concatenate( [self._data[demod][key][k], data[key][slices]] )
+                                    self._data[demod][key][k] = sp.concatenate( [self._data[demod][key][k], data[key][slices]] )
                                 
                                 # data that is not originally there but still has to be slices
                                 elif key == 'r':
                                     
-                                    r = np.sqrt( data['x'][slices]**2 + data['y'][slices]**2 )
-                                    self._data[demod]['r'][k] = np.concatenate( [self._data[demod]['r'][k], r] )
+                                    r = sp.sqrt( data['x'][slices]**2 + data['y'][slices]**2 )
+                                    self._data[demod]['r'][k] = sp.concatenate( [self._data[demod]['r'][k], r] )
                                     
                                     # and don't forget to update size
                                     self._dataSize += coreUtils.GetTotalSize(r)
@@ -136,12 +135,8 @@ class DataProcessor(threading.Thread):
                                     None
                                 elif key == 'spectrum':
                                     None
-                    ######
-                    # UPDATE R, PSD and OTHER STUFF HERE
-                    #############
                 
-                
-                # indicate thta task was done
+                # indicate that current task was done
                 self._newDataQueue.task_done()
         
 ### --------------------------------------------------------------------------------------------------
@@ -151,6 +146,28 @@ class DataProcessor(threading.Thread):
         # user data is pushed into parallel threads to ensure fast return
         # actual processing takes place in _DataProcessor
         self._newDataQueue.put(newData, False)
+        
+        self._newDataEvent.set()
+        
+### --------------------------------------------------------------------------------------------------
+    
+    def Start(self):
+        pass
+#        self._newDataEvent.set()
+        
+### --------------------------------------------------------------------------------------------------
+    
+    def Stop(self):
+        
+        # test if something is still in the pipe
+        # join waits until last task_done was called
+        self._newDataQueue.join()
+        # so here we're safe to kill the process loop
+        self._activeProcessor = False
+        # call a last time set although no data will be available
+        # only to exit the while loop and finish the thread
+        self._newDataEvent.set()
+        self._newDataEvent.clear()
         
 ### --------------------------------------------------------------------------------------------------
     
@@ -183,7 +200,7 @@ class DataProcessor(threading.Thread):
         ind   = defaultdict(list)
         
         for i, v in enumerate(lst):
-            if v in items: ind[v].append(i)
+            if v in items: ind['ePair_%s'%v].append(i)
         
         return ind
     
@@ -201,10 +218,10 @@ class DataProcessor(threading.Thread):
             ('counts'   , {}),
             ('psd'      , {}),
             ('spectrum' , {}),
-#            ('t'        , np.array([])),
-            ('timestamp', np.array([])),
-            ('frequency', np.array([])),
-            ('dio'      , np.array([])),
+#            ('t'        , sp.array([])),
+            ('timestamp', sp.array([])),
+            ('frequency', sp.array([])),
+            ('dio'      , sp.array([])),
             ('ePairs'   , [])
         ])
         
@@ -238,34 +255,7 @@ class DataProcessor(threading.Thread):
     def GetElectrodePairList(self):
         return self._uniqueElectrodePairs
     
-def DataGen(maxDemod=None, maxNewData=None, maxElectrodePair=None):
-    
-    if maxDemod == None:
-        maxDemod = 6
-    if maxNewData == None:
-        maxNewData = 1000
-    if maxElectrodePair == None:
-        maxElectrodePair = 31
-    
-    data = {}
-    
-    # 1-6 demodulators
-    for demod in range(np.random.randint(1,maxDemod+1)):
-        
-        key = 'dev10/demods/%s/sample/' % demod
-        
-        data[key] = {}
-        
-        # min 10, max 1000 new entries
-        arraySize = np.random.randint(1,maxNewData)
-        
-        data[key]['x']         = np.random.random (             arraySize )
-        data[key]['y']         = np.random.random (             arraySize )
-        data[key]['frequency'] = np.random.randint( 100, 50e6 , arraySize )
-        data[key]['timestamp'] = np.random.randint( 0  , 2**31, arraySize )
-        data[key]['dio']       = np.array([int("{0:032b}".format(int("{0:05b}".format(i)[::-1], 2)<<20), 2) for i in np.random.randint( 0, maxElectrodePair, arraySize )])
-        
-    return data
+
 
 if __name__ == '__main__':
     
@@ -274,17 +264,20 @@ if __name__ == '__main__':
     dataProcessor = DataProcessor()
     
     t = []
-    
+    dataProcessor.Start()
     for i in range(100):
         
-        newData = DataGen(6,1000,10)
+        newData = coreUtils.DataGen(1,10000,2)
         st = perf_counter()
         dataProcessor.UpdateData(newData)
         t.append(perf_counter()-st)
     
-    print('avg time expired: %3.5f ms' % (np.mean(t)*1000))
+    dataProcessor.Stop()
     
-    sleep(.1)
+    print('avg time expired: %3.5f ms' % (sp.mean(t)*1000))
+    
     print('size: %2.3f MB' % (dataProcessor.GetDataSize()/1024**2))
+    
+    sp.io.savemat('./mat_files/test.mat', {'Simulator': dataProcessor._data})
     
     dataProcessor.__del__()

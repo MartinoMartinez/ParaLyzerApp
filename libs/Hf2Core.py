@@ -5,12 +5,22 @@ Created on Tue May  9 17:23:26 2017
 @author: Martin Leonhardt (martin.leonhardt87@gmail.com)
 """
 
+
+__simulationMode__ = False
+
+
 import threading
-import zhinst.utils
-#import numpy as np
+try:
+    import zhinst.utils
+except ImportError:
+    __simulationMode__ = True
+
+
 import scipy as sp
 
 from time import sleep, time, perf_counter
+
+import matplotlib.pyplot as plt
 
 # in case this guy is used somewhere else
 # we need different loading of modules
@@ -18,6 +28,11 @@ try:
     from libs.CoreDevice import CoreDevice
 except ImportError:
     from CoreDevice import CoreDevice
+
+try:
+    from libs.DataProcessor import DataProcessor
+except ImportError:
+    from DataProcessor import DataProcessor
 
 try:
     from libs import coreUtilities as coreUtils
@@ -52,8 +67,9 @@ class Hf2Core(CoreDevice):
         
         # to stop measurement
         # initially no measurement is running
-        self._poll       = False
-        self._pollThread = None
+        self._poll          = False
+        self._pollThread    = None
+        self._dataProcessor = None
         # create locker to safely run parallel threads
         self._pollLocker = threading.Lock()
         
@@ -92,6 +108,13 @@ class Hf2Core(CoreDevice):
         flags['detectFunc'] = self.DetectDeviceAndSetupPort
         
         CoreDevice.__init__(self, **flags)
+        
+        # in case no device was found use simulation mode
+        if not self.comPortStatus:
+            global __simulationMode__
+            __simulationMode__ = True
+            self.deviceName = 'Simulator'
+            self.logger.warning('Simulation mode enabled!')
     
 ### -------------------------------------------------------------------------------------------------------------------------------
         
@@ -114,6 +137,9 @@ class Hf2Core(CoreDevice):
                 (daq, device, props) = zhinst.utils.create_api_session( device, self.__deviceApiLevel__ )
             except RuntimeError:
                 self.logger.info('Could not be found')
+            except NameError:
+                global __simulationMode__
+                __simulationMode__ = True
             else:
                 self.logger.info('Created API session for \'%s\' on \'%s:%s\' with api level \'%s\'' % (device, props['serveraddress'], props['serverport'], props['apilevel']))
                 
@@ -159,6 +185,10 @@ class Hf2Core(CoreDevice):
 
         if success:
             
+            # create new processor object
+            self._dataProcessor = DataProcessor()
+            self._dataProcessor.Start()
+            
             # initialize new thread
             self._pollThread = threading.Thread(target=self._PollData)
             # once polling thread is started loop is running till StopPoll() was called
@@ -184,6 +214,8 @@ class Hf2Core(CoreDevice):
             # end poll thread
             self._pollThread.join()
 #            self._debugThread.join()
+
+            self._dataProcessor.Stop()
             
             # write last part of the data to disk
             self.WriteMatFileToDisk()
@@ -198,7 +230,7 @@ class Hf2Core(CoreDevice):
             else:
                 self._recordString = 'Stopped.'
             
-#            plt.plot(self.timer['idx'], self.timer['elt'])
+            plt.plot(self.timer['idx'], self.timer['elt'])
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -226,50 +258,56 @@ class Hf2Core(CoreDevice):
         # check status of device... start if OK
         if self.comPortStatus:
             
+            # subscribe to all demodulators that have been enabled by LabOne interface
             self.comPort.subscribe(self._recordingDevices)
             
             # clear old data from polling buffer
             self.comPort.sync()
             
-            while self._poll:
-                
-                # lock thread to safely process
-                self._pollLocker.acquire()
-                
-                # for lag debugging
-                self.timer['idx'].append(idx)
-                idx += 1
-                self.timer['elt'].append(perf_counter()-start)
-                
-                # for lag debugging
-                start = perf_counter()
+        while self._poll:
+            
+            # lock thread to safely process
+            self._pollLocker.acquire()
+            
+            # for lag debugging
+            self.timer['idx'].append(idx)
+            idx += 1
+            self.timer['elt'].append(perf_counter()-start)
+            
+            # for lag debugging
+            start = perf_counter()
 
-                # fetch data
-                # block for 1 ms, timeout 10 ms, throw error if data is lost and return flat dictionary
-                # NOTE: poll downloads all data since last poll, sync or subscription
-                dataBuf = self.comPort.poll(1e-3, 10, 0x04, True)
+            # fetch data
+            # block for 1 ms, timeout 10 ms, throw error if data is lost and return flat dictionary
+            # NOTE: poll downloads all data since last poll, sync or subscription
+            if __simulationMode__:
+                newData = coreUtils.DataGen(6, 1000, 10)
+            else:
+                newData = self.comPort.poll(1e-3, 10, 0x04, True)
                 
-                # get all demods in data stream
-                for key in dataBuf.keys():
-                    
-                    # check if demodulator is already in dict, add if not (with standard structure)
-                    if key not in self._demods.keys():
-                        self._demods.update({key: self._GetStandardRecordStructure()})
-                    
-                    # fill structure with new data
-                    for k in self._demods[key].keys():
-                        if k in dataBuf[key].keys():
-                            self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
-                            
-                        # save flags for later use in GUI
-                        # look at dataloss and invalid time stamps
-                        if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
-                            self.logger.warning('%s was recognized! Data might be corrupted!' % k)
-                            self._recordFlags[k] = True
-
-
-                self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
-                    
+            self._dataProcessor.UpdateData(newData)
+            
+            # get all demods in data stream
+#            for key in dataBuf.keys():
+#                
+#                # check if demodulator is already in dict, add if not (with standard structure)
+#                if key not in self._demods.keys():
+#                    self._demods.update({key: self._GetStandardRecordStructure()})
+#                
+#                # fill structure with new data
+#                for k in self._demods[key].keys():
+#                    if k in dataBuf[key].keys():
+#                        self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
+#                        
+#                    # save flags for later use in GUI
+#                    # look at dataloss and invalid time stamps
+#                    if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
+#                        self.logger.warning('%s was recognized! Data might be corrupted!' % k)
+#                        self._recordFlags[k] = True
+#
+#
+#            self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
+                
 ########################################################
 #   --- THIS IS HERE FOR SIMPLE PLOTTING REASONS ---   #
 ########################################################
@@ -293,26 +331,28 @@ class Hf2Core(CoreDevice):
 #                    
 #                    # append data points
 #                    self.demods[key]['r'] = np.concatenate([self.demods[key]['r'], r])
-                    
                 
-                # check, according to strorage mode, if it's necessary to store a new file
-                if self._storageMode == 'fileSize':
-                    if (coreUtils.GetTotalSize(self._demods) // 1024**2) > (self._maxStreamFileSize-1):
-                        self.WriteMatFileToDisk()
-                        
-                elif self._storageMode == 'recTime':
-                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
-                        self.WriteMatFileToDisk()
-                        streamTime = time()
-                        
-                elif self._storageMode == 'tilterSync':
-                    None
-                
-                # critical stuff is done, release lock
-                self._pollLocker.release()
-                    
+            
+#            # check, according to strorage mode, if it's necessary to store a new file
+#            if self._storageMode == 'fileSize':
+#                if (coreUtils.GetTotalSize(self._demods) // 1024**2) > (self._maxStreamFileSize-1):
+#                    self.WriteMatFileToDisk()
+#                    
+#            elif self._storageMode == 'recTime':
+#                if ( time() - streamTime ) / 60 > self._maxStreamTime:
+#                    self.WriteMatFileToDisk()
+#                    streamTime = time()
+#                    
+#            elif self._storageMode == 'tilterSync':
+#                None
+            
+            # critical stuff is done, release lock
+            self._pollLocker.release()
+            
+            
             # unsubscribe after finished record event
-            self.comPort.unsubscribe('*')
+            if self.comPortStatus:
+                self.comPort.unsubscribe('*')
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -349,15 +389,16 @@ class Hf2Core(CoreDevice):
     def WriteMatFileToDisk(self):
         
         # create this just for debugging...
-        outFileBuf = {'demods': []}
-            
-        for key in self._demods.keys():
-            buf = {}
-            for k in self._demods[key]:
-                buf[k] = self._demods[key][k]
-            outFileBuf['demods'].append(buf)
-            
-        sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: outFileBuf})
+#        outFileBuf = {'demods': []}
+#        
+#        for key,item in self._demods.keys():
+#            buf = {}
+#            for k,i in item.items():
+#                buf[k] = i
+#            outFileBuf['demods'].append(buf)
+#            
+#        sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: outFileBuf})
+        sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: self._dataProcessor._data})
         
         # memory leak was found...try to fix it
         del self._demods
@@ -449,7 +490,7 @@ if __name__ == '__main__':
     
     hf2.StartPoll()
     
-    sleep(5)
+    sleep(.04)
     
     hf2.StopPoll()
     
