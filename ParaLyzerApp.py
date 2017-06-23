@@ -909,15 +909,8 @@ class ParaLyzerApp(Logger, StatusBar):
         tNum = {}
         
         for key, val in tStrings.items():
-            try:
-                buf = [int(i) for i in val.split(':')]
-                if len(buf) == 1:
-                    tNum[key] = buf[0]
-                elif len(tNum) == 2:
-                    tNum[key] = buf[0]*60 + buf[1]
-            except ValueError:
-                messagebox.showerror('Error', 'Could not convert %s to int!' % val)
-                raise
+            mins, secs = coreUtils.GetMinSecFromString(val)
+            tNum[key] = mins*60 + secs
             
         return tNum
         
@@ -1044,12 +1037,15 @@ class ParaLyzerApp(Logger, StatusBar):
             # NOTE: do not use SetupArduino of arduino instance directly
             #       list of electrode pairs has to be prepared according to flags
             if not self.paraLyzerCore.arduino.SetupArduino(**self.streamFlags):
-                messagebox.showerror('Error', 'Could not write setup to Arduino! Please check the connection...')
+                messagebox.showerror('Error', 'Could not write setup to Arduino! Please check the connection.\nFor more information check the log file.')
                 self.UpdateDetectionLabels()
                 success = False
             # if setup was successful, reset flag for start procedure
             else:
+                self.UpdateRightStatus('Arduino update successful.')
                 self.ePairsChanged = False
+        elif not self.somethingsSelected:
+            messagebox.showinfo('Info', 'Please select at least one electrode pair!')
                 
                 
         return success

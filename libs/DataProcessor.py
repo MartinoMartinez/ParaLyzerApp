@@ -7,8 +7,9 @@ Created on Sat Jun 17 00:42:53 2017
 
 import threading
 import queue
-import scipy as sp
+from scipy import io
 from collections import OrderedDict, defaultdict
+import scipy as sp
 
 from time import sleep
 
@@ -17,20 +18,54 @@ try:
 except ImportError:
     import coreUtilities as coreUtils
     
+    
+class DataSaver:
+    def __init__(self, fileName='stream0000.mat'):
+        
+        # store data underthis path and name
+        self._fName              = fileName
+        # set an event to halt the computation while file is being written
+        self._runProcessingEvent = threading.Event()
+        # immediately set it to allow processing
+        self._runProcessingEvent.set()
+        
+    def SetFileName(self, fileName):
+        assert isinstance(fileName, str), 'Expect string, not %r' % type(fileName)
+        self._fName = fileName
+        
+    def SaveData(self):
+        # clear event to halt processing
+        # no data is fetched from the queue
+        self._runProcessingEvent.clear()
+        
+        # store the file
+        io.savemat(self._fName, self._data)
+        
+        # reset internal data structure
+        self._ResetData()
+        
+        # set flag again to allow processing with fresh structure
+        self._runProcessingEvent.set()
+        
+        
+    
 
-class DataProcessor(threading.Thread):
+class DataProcessor(threading.Thread, DataSaver):
     
     __lockInAmpClock__ = 210e6
     
-    def __init__(self):
+    def __init__(self, **flags):
         
         threading.Thread.__init__(self, target=self._DataProcessor)
+        DataSaver.__init__(self, **flags)
         
-        self._data                 = {}
+        self._data                 = None
         self._dataSize             = 0
         self._startTime            = -1
         self._runTime              = 0
         self._uniqueElectrodePairs = []
+
+        self._ResetData()
         
         # pipeline for new incoming data
         # gets processed in an ordered fashion in _DataProcessor
@@ -54,10 +89,20 @@ class DataProcessor(threading.Thread):
         
 ### --------------------------------------------------------------------------------------------------
     
+    def _ResetData(self):
+        self._data     = defaultdict(OrderedDict)
+        self._dataSize = 0
+        
+### --------------------------------------------------------------------------------------------------
+
     def _DataProcessor(self):
         
         # run as long as user puts new data
         while self._activeProcessor:
+            
+            # wait until file was written
+            # in case there is now file being written at the moment, just pass
+            self._runProcessingEvent.wait()
              
             # get next task from queue
             try:
@@ -87,9 +132,6 @@ class DataProcessor(threading.Thread):
                     # so first get new ePairs
                     ePairs = self.DioToElectrodePair( data['dio'] )
                     
-                    # update unique electrode pairs
-                    self._UpdateUniqueElectrodePairs(ePairs)
-                    
                     # get slice indices from electrode pairs to slice special values
                     sliceIdices = self.SliceIdices(ePairs)
                     
@@ -103,6 +145,8 @@ class DataProcessor(threading.Thread):
                         # OR simple adding
                         elif key == 'ePairs':
                             self._data[demod][key].extend(ePairs)
+                            # update unique electrode pairs
+                            self._UpdateUniqueElectrodePairs(ePairs)
                             # and don't forget to update size
                             self._dataSize += coreUtils.GetTotalSize(ePairs)
                             
@@ -143,11 +187,12 @@ class DataProcessor(threading.Thread):
                     
     def UpdateData(self, newData):
         
-        # user data is pushed into parallel threads to ensure fast return
-        # actual processing takes place in _DataProcessor
-        self._newDataQueue.put(newData, False)
-        
-        self._newDataEvent.set()
+        if newData:
+            # user data is pushed into parallel thread to ensure fast return
+            # actual processing takes place in _DataProcessor
+            self._newDataQueue.put(newData, False)
+            
+            self._newDataEvent.set()
         
 ### --------------------------------------------------------------------------------------------------
     
@@ -173,9 +218,9 @@ class DataProcessor(threading.Thread):
     
     def _UpdateUniqueElectrodePairs(self, ePairs):
         # flatten list
-        lst = sum([self._uniqueElectrodePairs, ePairs],[])
+        self._uniqueElectrodePairs.extend(ePairs)
         # write new uniques
-        self._uniqueElectrodePairs = self.Uniques(lst)
+        self._uniqueElectrodePairs = self.Uniques(self._uniqueElectrodePairs)
         
 ### --------------------------------------------------------------------------------------------------
                     
@@ -190,11 +235,16 @@ class DataProcessor(threading.Thread):
 ### --------------------------------------------------------------------------------------------------
                     
     def Uniques(self, lst):
+        ''' return a list of unique elements in lst
+        '''
         return list(set(lst))
         
 ### --------------------------------------------------------------------------------------------------
                     
     def SliceIdices(self, lst):
+        ''' returns a dictionary with all unique elements in lst as key
+            with their corresponding indices in lst
+        '''
         
         items = self.Uniques(lst)
         ind   = defaultdict(list)
@@ -228,7 +278,7 @@ class DataProcessor(threading.Thread):
 ### --------------------------------------------------------------------------------------------------
                     
     def DemodNumber(self, s):
-        return int(s.split('/')[-3])
+        return int(s.split('/')[-2])
     
 ### --------------------------------------------------------------------------------------------------
                     
@@ -261,7 +311,8 @@ if __name__ == '__main__':
     
     from time import perf_counter
     
-    dataProcessor = DataProcessor()
+    fileIdx = 0
+    dataProcessor = DataProcessor(fileName='./mat_files/stream%04d.mat'%fileIdx)
     
     t = []
     dataProcessor.Start()
@@ -271,6 +322,14 @@ if __name__ == '__main__':
         st = perf_counter()
         dataProcessor.UpdateData(newData)
         t.append(perf_counter()-st)
+        
+        if i%10 == 0:
+            print('size: %3.5f MB' % (dataProcessor.GetDataSize()/1024**2))
+            
+        if (dataProcessor.GetDataSize()//1024**2) > 4:
+            dataProcessor.SaveData()
+            fileIdx += 1
+            dataProcessor.SetFileName('./mat_files/stream%04d.mat'%fileIdx)
     
     dataProcessor.Stop()
     

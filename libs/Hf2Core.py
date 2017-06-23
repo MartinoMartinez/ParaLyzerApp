@@ -122,6 +122,9 @@ class Hf2Core(CoreDevice):
 
         self.StopPoll()
         
+        if self._dataProcessor:
+            self._dataProcessor.__del__()
+        
         CoreDevice.__del__(self)
         
     
@@ -219,6 +222,9 @@ class Hf2Core(CoreDevice):
             
             # write last part of the data to disk
             self.WriteMatFileToDisk()
+            
+            self._dataProcessor.__del__()
+            
             # reset file counter for next run
             self._strmFlCnt = 0
             
@@ -230,7 +236,7 @@ class Hf2Core(CoreDevice):
             else:
                 self._recordString = 'Stopped.'
             
-            plt.plot(self.timer['idx'], self.timer['elt'])
+#            plt.plot(self.timer['idx'], self.ti1mer['elt'])
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -264,50 +270,50 @@ class Hf2Core(CoreDevice):
             # clear old data from polling buffer
             self.comPort.sync()
             
-        while self._poll:
-            
-            # lock thread to safely process
-            self._pollLocker.acquire()
-            
-            # for lag debugging
-            self.timer['idx'].append(idx)
-            idx += 1
-            self.timer['elt'].append(perf_counter()-start)
-            
-            # for lag debugging
-            start = perf_counter()
-
-            # fetch data
-            # block for 1 ms, timeout 10 ms, throw error if data is lost and return flat dictionary
-            # NOTE: poll downloads all data since last poll, sync or subscription
-            if __simulationMode__:
-                newData = coreUtils.DataGen(6, 1000, 10)
-            else:
-                newData = self.comPort.poll(1e-3, 10, 0x04, True)
+            while self._poll:
                 
-            self._dataProcessor.UpdateData(newData)
-            
-            # get all demods in data stream
-#            for key in dataBuf.keys():
-#                
-#                # check if demodulator is already in dict, add if not (with standard structure)
-#                if key not in self._demods.keys():
-#                    self._demods.update({key: self._GetStandardRecordStructure()})
-#                
-#                # fill structure with new data
-#                for k in self._demods[key].keys():
-#                    if k in dataBuf[key].keys():
-#                        self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
-#                        
-#                    # save flags for later use in GUI
-#                    # look at dataloss and invalid time stamps
-#                    if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
-#                        self.logger.warning('%s was recognized! Data might be corrupted!' % k)
-#                        self._recordFlags[k] = True
-#
-#
-#            self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
+                # lock thread to safely process
+                self._pollLocker.acquire()
                 
+                # for lag debugging
+                self.timer['idx'].append(idx)
+                idx += 1
+                self.timer['elt'].append(perf_counter()-start)
+                
+                # for lag debugging
+                start = perf_counter()
+    
+                # fetch data
+                # block for 1 ms, timeout 10 ms, throw error if data is lost and return flat dictionary
+                # NOTE: poll downloads all data since last poll, sync or subscription
+#                if __simulationMode__:
+#                    newData = coreUtils.DataGen(6, 1000, 10)
+#                else:
+                newData = self.comPort.poll(10e-3, 10, 0x04, True)
+                    
+                self._dataProcessor.UpdateData(newData)
+                
+                # get all demods in data stream
+#                for key in dataBuf.keys():
+#                    
+#                    # check if demodulator is already in dict, add if not (with standard structure)
+#                    if key not in self._demods.keys():
+#                        self._demods.update({key: self._GetStandardRecordStructure()})
+#                    
+#                    # fill structure with new data
+#                    for k in self._demods[key].keys():
+#                        if k in dataBuf[key].keys():
+#                            self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
+#                            
+#                        # save flags for later use in GUI
+#                        # look at dataloss and invalid time stamps
+#                        if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
+#                            self.logger.warning('%s was recognized! Data might be corrupted!' % k)
+#                            self._recordFlags[k] = True
+#   
+#   
+#                self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
+                    
 ########################################################
 #   --- THIS IS HERE FOR SIMPLE PLOTTING REASONS ---   #
 ########################################################
@@ -333,21 +339,24 @@ class Hf2Core(CoreDevice):
 #                    self.demods[key]['r'] = np.concatenate([self.demods[key]['r'], r])
                 
             
-#            # check, according to strorage mode, if it's necessary to store a new file
-#            if self._storageMode == 'fileSize':
-#                if (coreUtils.GetTotalSize(self._demods) // 1024**2) > (self._maxStreamFileSize-1):
-#                    self.WriteMatFileToDisk()
-#                    
-#            elif self._storageMode == 'recTime':
-#                if ( time() - streamTime ) / 60 > self._maxStreamTime:
-#                    self.WriteMatFileToDisk()
-#                    streamTime = time()
-#                    
-#            elif self._storageMode == 'tilterSync':
-#                None
-            
-            # critical stuff is done, release lock
-            self._pollLocker.release()
+                # check, according to strorage mode, if it's necessary to store a new file
+                if self._storageMode == 'fileSize':
+                    if (self._dataProcessor.GetDataSize()//1024**2) > (self._maxStreamFileSize-1):
+                        self._dataProcessor.Stop()
+                        self.WriteMatFileToDisk()
+                        self._dataProcessor.ResetData()
+                        self._dataProcessor.Start()
+                        
+#                elif self._storageMode == 'recTime':
+#                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
+#                        self.WriteMatFileToDisk()
+#                        streamTime = time()
+#                        
+#                elif self._storageMode == 'tilterSync':
+#                    None
+                
+                # critical stuff is done, release lock
+                self._pollLocker.release()
             
             
             # unsubscribe after finished record event
@@ -450,25 +459,6 @@ class Hf2Core(CoreDevice):
         assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
         
         self._maxStreamTime = streamTime
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def DebugDioThread(self):
-        
-        while self._poll:
-            for key in self._demods.keys():
-                print('DIO: %s' % self._demods[key]['ePair'])
-            sleep(1)
-            
-            
-def DioByteToChamber(dioByte):
-    ''' HF2 DIO lines are stored in a 32 bit number
-        cut relevant bits and switch order
-        DIO24 - Pin8 ... DIO20 - Pin12
-        so MSB in Arduino is LSB for HF2
-        return decimal number from the cut 5 bits
-    '''
-    return [ int(format(int(i), '032b')[7:12][::-1], 2) for i in dioByte]
             
             
             
@@ -481,7 +471,7 @@ def DioByteToChamber(dioByte):
 if __name__ == '__main__':
     
     # create new HF2 object
-    hf2 = Hf2Core(storageMode='recTime', streamTime=.2)
+    hf2 = Hf2Core()
 #    # create new HF2 object and change standard storage path
 #    hf2 = Hf2Core(baseStreamFolder='C:/TEMP/MY_MATLAB_FILES')
     
@@ -490,7 +480,7 @@ if __name__ == '__main__':
     
     hf2.StartPoll()
     
-    sleep(.04)
+    sleep(1)
     
     hf2.StopPoll()
     

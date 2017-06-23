@@ -260,12 +260,6 @@ class ParaLyzerCore(Logger):
         collectCnt   =     flags.get( 'cnti'      , False )
         collectVia   =     flags.get( 'viai'      , False )
         
-        print('collectFirst: %s' % collectFirst)
-        print('collectCnt: %s' % collectCnt)
-        print('collectVia: %s' % collectVia)
-        print('flags in SelectElectrodePairs %s: %s' % (__name__, flags))
-        print('definedElectrodePairs in SelectElectrodePairs %s: %s' % (__name__, definedElectrodePairs))
-        
         # pre-sort dictionary
         # since dicts use string keys, sort doesn't work properly
         # we need to turn it into an integer list
@@ -303,8 +297,6 @@ class ParaLyzerCore(Logger):
         else:
             for key in dummyList:
                 ePairs.append( definedElectrodePairs[key] )
-                
-        print('ePairs in SelectElectrodePairs %s: %s' % (__name__, ePairs))
         
         return ePairs
         

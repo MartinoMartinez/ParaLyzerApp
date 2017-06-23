@@ -279,15 +279,15 @@ void serialEvent() {
         commandComplete = true;
       }
       else {
-        Serial.println("Received invalid stream, checksums are not identical!");
+        Serial.println("ERROR: Received invalid stream, checksums are not identical!");
       }
     }
     else {
-      Serial.println("Received invalid stream, could not grasp checksum!");
+      Serial.println("ERROR: Received invalid stream, could not grasp checksum!");
     }
   }
   else {
-    Serial.println("Received invalid stream, could not find header and/or footer!");
+    Serial.println("ERROR: Received invalid stream, could not find header and/or footer!");
   }
     
       // valid stream so we can check for the command
@@ -448,11 +448,11 @@ void serialEvent() {
             }
           }
           else {
-            DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
+            Serial.println("ERROR: Given number of bytes is invalid.");
           }
         }
         else {
-          DEBUG_PRINT("ERROR: Number expected after command.");
+          Serial.println("ERROR: Number expected after command.");
         }
       }
 // -----------------------------------------------------------------------------
@@ -477,14 +477,14 @@ void serialEvent() {
             cameraFrameRate = value;
             cameraTimeFrame = 1e6/cameraFrameRate;    // how many microseconds
             
-            DEBUG_PRINT("Camera frame rate " + String(cameraFrameRate));
+            Serial.println("Camera frame rate " + String(cameraFrameRate));
           }
           else {
-            DEBUG_PRINT("ERROR: Given number of bytes is invalid.");
+            Serial.println("ERROR: Given number of bytes is invalid.");
           }
         }
         else {
-          DEBUG_PRINT("ERROR: Number expected after command.");
+          Serial.println("ERROR: Number expected after command.");
         }
       }
 // -----------------------------------------------------------------------------
@@ -515,7 +515,7 @@ void serialEvent() {
           blinkingScheme();
         }
         // throw user info
-        Serial.println("Info: Test was executed.");
+        Serial.println("INFO: Test was executed.");
       }
 // -----------------------------------------------------------------------------
       else if (!strcmp(commandString, "tilt")) {
@@ -543,7 +543,7 @@ void serialEvent() {
           }
         }
         else {
-          DEBUG_PRINT("ERROR: Number expected after command.");
+          Serial.println("ERROR: Number expected after command.");
         }
       }
 // -----------------------------------------------------------------------------
@@ -559,7 +559,7 @@ void writeDaisyChain() {
 //    lockCommand = true;
 //  }
 
-  
+  uint8_t del = 5;
   // enable writing to switches
   // no changes on switches during toogling (only acquired with SYNC HIGH)
   SYNC_LOW;
@@ -574,29 +574,41 @@ void writeDaisyChain() {
   // write zeros till switch
   while (--swIdx > actSwIdx) {
     CLOCK_HIGH;
+    delayMicroseconds(del);
     CLOCK_LOW;
+    delayMicroseconds(del);
   }
   
   // write one for switch
   // data is captured on falling edge of clock
   CLOCK_HIGH;
+    delayMicroseconds(del);
   DATA_OUT_HIGH;
+    delayMicroseconds(del);
   CLOCK_LOW;
+    delayMicroseconds(del);
   DATA_OUT_LOW;
+    delayMicroseconds(del);
     
   actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[0];     // also change here cause it's decrementing...
   // write zeros till switch
   while (--swIdx > actSwIdx) {
     CLOCK_HIGH;
+    delayMicroseconds(del);
     CLOCK_LOW;
+    delayMicroseconds(del);
   }
   
   // write one for switch
   // data is captured on falling edge of clock
   CLOCK_HIGH;
+    delayMicroseconds(del);
   DATA_OUT_HIGH;
+    delayMicroseconds(del);
   CLOCK_LOW;
+    delayMicroseconds(del);
   DATA_OUT_LOW;
+    delayMicroseconds(del);
 
   ////////////////////////////////////////////////////
   //          --- INSERT BLOCK HERE ---             //
@@ -606,7 +618,9 @@ void writeDaisyChain() {
   // write zeros till last switch index...no more active ones after that
   while (--swIdx > -1) {
     CLOCK_HIGH;
+    delayMicroseconds(del);
     CLOCK_LOW;
+    delayMicroseconds(del);
   }
   
   // tell all switches to read register content

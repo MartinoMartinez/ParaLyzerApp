@@ -233,7 +233,7 @@ def DataGen(maxDemod=None, arraySize=None, maxElectrodePair=None):
     # 1-6 demodulators
     for demod in range(sp.random.randint(1,maxDemod+1)):
         
-        key = 'dev10/demods/%s/sample/' % demod
+        key = '/dev10/demods/%s/sample' % demod
         
         data[key] = {}
         

@@ -133,18 +133,17 @@ class ArduinoCore(CoreDevice):
             # NOTE: flush is deprecated with pySerial > v3.0
             msg = 'START %s %s END\r' % (checkSum, msg)
             
-            print(msg)
-
-            
             success = self.SafeWriteToComPort(msg.encode('latin-1'), leaveOpen=True)
             
-            
             if success:
-                if self._debugMode:
-                    
-                    inMsg = self.SafeReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
-                    
-                    self.logger.debug('Received message from Arduino: %s' % inMsg)
+                
+                inMsg = self.SafeReadFromComPort(mode='waiting', waitFor=1, bePatient=25, decode=True).replace('\n', ', ')
+                
+                self.logger.debug('Received message from Arduino: %s' % inMsg)
+                
+                # in case message is not empty something probably went wrong
+                if 'ERROR' in inMsg:
+                    success = False
                         
         return success
     
@@ -268,8 +267,6 @@ class ArduinoCore(CoreDevice):
         sendStream = []
 
         ePairs = self.SelectElectrodePairs(selectFunc, **flags)
-            
-        print(ePairs)
         
         if len(ePairs) == 0:
             success = False
@@ -519,29 +516,33 @@ if __name__ == '__main__':
 #        arduino.DefineElectrodePair(i, 1e6)
 
     arduino.UpdateConfig(chipConfig='./cfg/ChipConfigSeb.json')
-
-    arduino.DefineElectrodePair(0, 1e3)
-    arduino.DefineElectrodePair(2, 1e3)
-        
-    arduino.SetupArduino()
     
+    stream = arduino.GenerateSendStream(0,500000) + arduino.GenerateSendStream(2,500000)
+    
+    arduino.SendMessage("setelectrodes 2 %s"%stream)
+
+#    arduino.DefineElectrodePair(0, 1e6)
+#    arduino.DefineElectrodePair(1, 1e6)
+#        
+#    arduino.SetupArduino()
+#    
 #    arduino.SendMessage( 'setelectrodes 1 %s' % arduino.GenerateSendStream(15,0) )
 #    arduino.SendMessage('setelectrodes 1 125ABCDEFG')
     from time import time
-    sT = time()
-    while time()-sT < 2:
-        print(arduino.comPort.read(arduino.comPort.in_waiting))
-        sleep(100e-3)
-    
+#    sT = time()
+#    while time()-sT < 2:
+#        print(arduino.comPort.read(arduino.comPort.in_waiting))
+#        sleep(100e-3)
+#    
+    sleep(2)
     arduino.Start()
-    
-    sT = time()
-    while time()-sT < 5:
-        print(arduino.comPort.read(arduino.comPort.in_waiting))
-        sleep(.5)
-    
-    arduino.Stop()
-    arduino.comPort.close()
+#    
+#    sT = time()
+#    while time()-sT < 5:
+#        print(arduino.comPort.read(arduino.comPort.in_waiting))
+#        sleep(.5)
+#    
+#    arduino.comPort.close()
 #    
 #    
 #    #######################################################
@@ -555,6 +556,10 @@ if __name__ == '__main__':
 #    arduino.SetupArduino()
 #    
 #    
+    try:
+        while True:
+            None
+    except KeyboardInterrupt:
+        arduino.Stop()
     
-
     arduino.__del__()
