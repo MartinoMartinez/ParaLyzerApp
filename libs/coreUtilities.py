@@ -111,6 +111,7 @@ def SafeMakeDir(folder, caller=None):
             os.makedirs(folder)
         except OSError:
             SafeLogger('error', 'Could not create folder \'%s\'!' % folder, caller)
+            success = False
         else:
             SafeLogger('info', 'Created folder \'%s\'' % folder, caller)
             

@@ -18,35 +18,145 @@ try:
 except ImportError:
     import coreUtilities as coreUtils
     
+
+
+
+    
     
 class DataSaver:
-    def __init__(self, fileName='stream0000.mat'):
+    
+    # default parameters for storing determination
+    __maxStrmFlSize__    = 10     # 10 MB
+    __maxStrmTime__      = 0.5    # 30 s
+    
+    # supported stream modes
+    __storageModes__     = ['fileSize', 'recTime', 'eventSync']
+    
+    def __init__(self, baseFolder='./mat_files/', filePrefix='stream', storageMode='fileSize', 
+                 streamFileSize=None, streamTime=None):
         
-        # store data underthis path and name
-        self._fName              = fileName
-        # set an event to halt the computation while file is being written
-        self._runProcessingEvent = threading.Event()
-        # immediately set it to allow processing
-        self._runProcessingEvent.set()
+        # check for valid storage mode
+        if storageMode in self.__storageModes__:
+            self._storageMode = storageMode
+        else:
+            raise Exception('Unsupported storage mode: %s' % storageMode)
         
-    def SetFileName(self, fileName):
-        assert isinstance(fileName, str), 'Expect string, not %r' % type(fileName)
-        self._fName = fileName
+        self._maxStreamFileSize = 0
+        self._maxStreamTime     = 0
+        
+        # check for ambiguous setup
+        if streamFileSize and streamTime:
+            raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
+        else:
+            self.SetStreamFileSize( streamFileSize if streamFileSize else self.__maxStrmFlSize__ )
+            self.SetStreamTime    ( streamTime     if streamTime     else self.__maxStrmTime__   )
+            
+        # store mat files under this path
+        self._baseFolder    = ''
+        self._streamFolder  = ''
+        self._folderCounter = 0
+        # store data under name
+        self._filePrefix    = filePrefix
+        # use a counter to store multiple files
+        self._fileCounter   = 0
+        
+        self.SetBaseFolder(baseFolder)
+        
+### --------------------------------------------------------------------------------------------------
+        
+    def SetBaseFolder(self, baseFolder):
+        assert isinstance(baseFolder, str), 'Expect string, not %r' % type(baseFolder)
+        
+        if self._CreateBaseFolder(baseFolder):
+            self._baseFolder   = baseFolder
+            self._streamFolder = baseFolder
+        else:
+            Exception('Cannot access \'%s\' for writing!')
+        
+### --------------------------------------------------------------------------------------------------
+        
+    def _CreateBaseFolder(self, baseFolder):
+        if coreUtils.SafeMakeDir(baseFolder, self):
+            if coreUtils.IsAccessible(baseFolder, 'write'):
+                return True
+        return False
+        
+### --------------------------------------------------------------------------------------------------
+        
+    def SetFilePrefix(self, filePrefix):
+        assert isinstance(filePrefix, str), 'Expect string, not %r' % type(filePrefix)
+        self._filePrefix = filePrefix
+        
+### --------------------------------------------------------------------------------------------------
         
     def SaveData(self):
-        # clear event to halt processing
-        # no data is fetched from the queue
-        self._runProcessingEvent.clear()
+        
+        fName = self._streamFolder + self._filePrefix + '%05d.mat'%self._fileCounter
+        
+#        print(fName)
+#        print(self.deviceName)
         
         # store the file
-        io.savemat(self._fName, self._data)
+        io.savemat(fName, {self.deviceName: self._data})
         
-        # reset internal data structure
-        self._ResetData()
+        # increment file counter
+        self._fileCounter += 1
         
-        # set flag again to allow processing with fresh structure
-        self._runProcessingEvent.set()
+### --------------------------------------------------------------------------------------------------
         
+    def CreateNewStreamFolder(self):
+        
+        success = False
+        
+        sF = self._baseFolder
+        if coreUtils.SafeMakeDir(sF, self):
+            sF += 'session_' + self.coreStartTime + '/'
+            if coreUtils.SafeMakeDir(sF, self):
+                sF += 'stream%04d/' % self._folderCounter
+                if coreUtils.SafeMakeDir(sF, self):
+                    # set new stream folder to class var
+                    self._streamFolder = sF
+                    # increment folder counter for multiple streams
+                    self._folderCounter += 1
+                    
+                    success = True
+                
+        return success
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStorageMode(self, storageMode):
+        
+        if storageMode in self.__storageModes__:
+            self._storageMode = storageMode
+        else:
+            raise Exception('Unsupported storage mode: %s' % storageMode)
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStreamFileSize(self, fileSize):
+        
+        assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
+        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
+        
+        self._maxStreamFileSize = fileSize
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def SetStreamTime(self, streamTime):
+        
+        assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
+        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
+        
+        self._maxStreamTime = streamTime
+
+
+### --------------------------------------------------------------------------------------------------
+        
+### --------------------------------------------------------------------------------------------------
+        
+### --------------------------------------------------------------------------------------------------
+
         
     
 
@@ -56,8 +166,8 @@ class DataProcessor(threading.Thread, DataSaver):
     
     def __init__(self, **flags):
         
-        threading.Thread.__init__(self, target=self._DataProcessor)
         DataSaver.__init__(self, **flags)
+        threading.Thread.__init__(self, target=self._DataProcessor)
         
         self._data                 = None
         self._dataSize             = 0
@@ -89,6 +199,12 @@ class DataProcessor(threading.Thread, DataSaver):
         
 ### --------------------------------------------------------------------------------------------------
     
+    def _SaveData(self):
+        self.SaveData()
+        self._ResetData()
+        
+### --------------------------------------------------------------------------------------------------
+    
     def _ResetData(self):
         self._data     = defaultdict(OrderedDict)
         self._dataSize = 0
@@ -99,10 +215,6 @@ class DataProcessor(threading.Thread, DataSaver):
         
         # run as long as user puts new data
         while self._activeProcessor:
-            
-            # wait until file was written
-            # in case there is now file being written at the moment, just pass
-            self._runProcessingEvent.wait()
              
             # get next task from queue
             try:
@@ -110,7 +222,7 @@ class DataProcessor(threading.Thread, DataSaver):
             except queue.Empty:
                 # in case queue is empty wait for more data        
                 self._newDataEvent.clear()
-                self._newDataEvent.wait(timeout=1e-4)
+                self._newDataEvent.wait()#timeout=1e-4)
             else:
                 
                 # estimate size
@@ -133,15 +245,20 @@ class DataProcessor(threading.Thread, DataSaver):
                     ePairs = self.DioToElectrodePair( data['dio'] )
                     
                     # get slice indices from electrode pairs to slice special values
-                    sliceIdices = self.SliceIdices(ePairs)
+#                    sliceIdices = self.SliceIdices(ePairs)
                     
                     # go through all the keys in the class member
                     for key in self._data[demod].keys():
                     
                         # just copy if standard values
-                        if key in ['timestamp', 'frequency', 'dio']:
+                        if key == 'timestamp':
                             self._data[demod][key] = sp.concatenate( [self._data[demod][key], data[key]] )
                         
+                        # OR single value
+                        elif key == 'frequency':
+                            if self._data[demod][key] == -1:
+                                self._data[demod][key] = data[key][0]
+                            
                         # OR simple adding
                         elif key == 'ePairs':
                             self._data[demod][key].extend(ePairs)
@@ -153,23 +270,29 @@ class DataProcessor(threading.Thread, DataSaver):
                         # OR slicing is necessary
                         else:
                             # slice x,y and others with given slice indices
-                            for k,slices in sliceIdices.items():
-                                # get new np array in case electrode pairs was never used before
-                                if k not in self._data[demod][key].keys():
-                                    self._data[demod][key][k] = sp.array([])
+                                for k,slices in enumerate(self._uniqueElectrodePairs):
                                     
-                                # data that is originally there but needs to be sliced
-                                if key in data.keys():
-                                    self._data[demod][key][k] = sp.concatenate( [self._data[demod][key][k], data[key][slices]] )
-                                
-                                # data that is not originally there but still has to be slices
-                                elif key == 'r':
+                                    # get new matlab readable key
+                                    k = 'ePairs_%s'%k
+                                    # store slices for later use
+#                                    s = ePairs==slices
                                     
-                                    r = sp.sqrt( data['x'][slices]**2 + data['y'][slices]**2 )
-                                    self._data[demod]['r'][k] = sp.concatenate( [self._data[demod]['r'][k], r] )
+                                    # get new np array in case electrode pairs was never used before
+                                    if k not in self._data[demod][key].keys():
+                                        self._data[demod][key][k] = sp.array([])
+                                        
+                                    # data that is originally there but needs to be sliced
+                                    if key in data.keys():
+                                        self._data[demod][key][k] = sp.concatenate( [self._data[demod][key][k], data[key][ePairs==slices]] )
                                     
-                                    # and don't forget to update size
-                                    self._dataSize += coreUtils.GetTotalSize(r)
+                                    # data that is not originally there but still has to be slices
+                                    elif key == 'r':
+                                        
+                                        r = sp.sqrt( data['x'][ePairs==slices]**2 + data['y'][ePairs==slices]**2 )
+                                        self._data[demod]['r'][k] = sp.concatenate( [self._data[demod]['r'][k], r] )
+                                        
+                                        # and don't forget to update size
+                                        self._dataSize += coreUtils.GetTotalSize(r)
                                 
                                 elif key == 'motility':
                                     None
@@ -182,6 +305,18 @@ class DataProcessor(threading.Thread, DataSaver):
                 
                 # indicate that current task was done
                 self._newDataQueue.task_done()
+                
+                # check, according to strorage mode, if it's necessary to store a new file
+                if self._storageMode == 'fileSize':
+                    if (self.GetDataSize()//1024**2) > (self._maxStreamFileSize-1):
+                        self._SaveData()
+                        
+                elif self._storageMode == 'recTime':
+                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
+                        self._SaveData()
+                        
+                elif self._storageMode == 'eventSync':
+                    None
         
 ### --------------------------------------------------------------------------------------------------
                     
@@ -198,7 +333,6 @@ class DataProcessor(threading.Thread, DataSaver):
     
     def Start(self):
         pass
-#        self._newDataEvent.set()
         
 ### --------------------------------------------------------------------------------------------------
     
@@ -213,6 +347,11 @@ class DataProcessor(threading.Thread, DataSaver):
         # only to exit the while loop and finish the thread
         self._newDataEvent.set()
         self._newDataEvent.clear()
+        
+        # here we are sure nothing is running
+        # so we can save the rest of the data
+        if self.GetDataSize() > 0:
+            self._SaveData()
         
 ### --------------------------------------------------------------------------------------------------
     
@@ -270,8 +409,8 @@ class DataProcessor(threading.Thread, DataSaver):
             ('spectrum' , {}),
 #            ('t'        , sp.array([])),
             ('timestamp', sp.array([])),
-            ('frequency', sp.array([])),
-            ('dio'      , sp.array([])),
+            ('frequency', -1),
+#            ('dio'      , sp.array([])),
             ('ePairs'   , [])
         ])
         
@@ -311,8 +450,7 @@ if __name__ == '__main__':
     
     from time import perf_counter
     
-    fileIdx = 0
-    dataProcessor = DataProcessor(fileName='./mat_files/stream%04d.mat'%fileIdx)
+    dataProcessor = DataProcessor()
     
     t = []
     dataProcessor.Start()
@@ -326,17 +464,15 @@ if __name__ == '__main__':
         if i%10 == 0:
             print('size: %3.5f MB' % (dataProcessor.GetDataSize()/1024**2))
             
-        if (dataProcessor.GetDataSize()//1024**2) > 4:
-            dataProcessor.SaveData()
-            fileIdx += 1
-            dataProcessor.SetFileName('./mat_files/stream%04d.mat'%fileIdx)
-    
+#        if (dataProcessor.GetDataSize()//1024**2) > 4:
+#            dataProcessor.SaveData()
+            
     dataProcessor.Stop()
     
     print('avg time expired: %3.5f ms' % (sp.mean(t)*1000))
     
-    print('size: %2.3f MB' % (dataProcessor.GetDataSize()/1024**2))
+#    print('size: %2.3f MB' % (dataProcessor.GetDataSize()/1024**2))
     
-    sp.io.savemat('./mat_files/test.mat', {'Simulator': dataProcessor._data})
+#    sp.io.savemat('./mat_files/test.mat', {'Simulator': dataProcessor._data})
     
     dataProcessor.__del__()

@@ -16,7 +16,7 @@ except ImportError:
     __simulationMode__ = True
 
 
-import scipy as sp
+from scipy import io
 
 from time import sleep, time, perf_counter
 
@@ -39,9 +39,8 @@ try:
 except ImportError:
     import coreUtilities as coreUtils
 
-
     
-class Hf2Core(CoreDevice):
+class Hf2Core(CoreDevice, DataProcessor):
     
     __deviceId__         = ['dev10', 'dev275']
     __deviceApiLevel__   = 1
@@ -49,21 +48,23 @@ class Hf2Core(CoreDevice):
     __recordingDevices__ = '/demods/*/sample'   # device ID is added later...
     
     # default parameters for storing determination
-    __maxStrmFlSize__    = 10     # 10 MB
-    __maxStrmTime__      = 0.5    # 30 s
-    
-    # supported stream modes
-    __storageModes__     = ['fileSize', 'recTime', 'tilterSync']
+#    __maxStrmFlSize__    = 10     # 10 MB
+#    __maxStrmTime__      = 0.5    # 30 s
+#    
+#    # supported stream modes
+#    __storageModes__     = ['fileSize', 'recTime', 'tilterSync']
     
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def __init__(self, baseStreamFolder='./mat_files', storageMode='fileSize', **flags):
+    def __init__(self, **flags):
+        
+        DataProcessor.__init__(self, **flags)
         
         # store chosen device name here
         self.deviceName = None
         
         # dictionary to store all demodulator results
-        self._demods = {}
+#        self._demods = {}
         
         # to stop measurement
         # initially no measurement is running
@@ -85,25 +86,25 @@ class Hf2Core(CoreDevice):
                 }
         
         # variables to count streams (folder + files)
-        self._baseStreamFolder = baseStreamFolder
-        self._streamFolder     = baseStreamFolder
-        self._strmFlCnt        = 0
-        self._strmFldrCnt      = 0
+#        self._baseStreamFolder = baseStreamFolder
+#        self._streamFolder     = baseStreamFolder
+#        self._strmFlCnt        = 0
+#        self._strmFldrCnt      = 0
         
         # check if folder is available, if not create
-        coreUtils.SafeMakeDir(self._baseStreamFolder, self)
-        
-        if storageMode in self.__storageModes__:
-            self._storageMode = storageMode
-        else:
-            raise Exception('Unsupported storage mode: %s' % storageMode)
-            
-        # check for ambiguous setup
-        if 'streamFileSize' in flags.keys() and 'streamTime' in flags.keys():
-            raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
-        else:
-            self.SetStreamFileSize( flags.get( 'streamFileSize', self.__maxStrmFlSize__ ) )
-            self.SetStreamTime    ( flags.get( 'streamTime'    , self.__maxStrmTime__   ) )
+#        coreUtils.SafeMakeDir(self._baseStreamFolder, self)
+#        
+#        if storageMode in self.__storageModes__:
+#            self._storageMode = storageMode
+#        else:
+#            raise Exception('Unsupported storage mode: %s' % storageMode)
+#            
+#        # check for ambiguous setup
+#        if 'streamFileSize' in flags.keys() and 'streamTime' in flags.keys():
+#            raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
+#        else:
+#            self.SetStreamFileSize( flags.get( 'streamFileSize', self.__maxStrmFlSize__ ) )
+#            self.SetStreamTime    ( flags.get( 'streamTime'    , self.__maxStrmTime__   ) )
         
         flags['detectFunc'] = self.DetectDeviceAndSetupPort
         
@@ -122,8 +123,7 @@ class Hf2Core(CoreDevice):
 
         self.StopPoll()
         
-        if self._dataProcessor:
-            self._dataProcessor.__del__()
+        DataProcessor.__del__(self)
         
         CoreDevice.__del__(self)
         
@@ -159,38 +159,9 @@ class Hf2Core(CoreDevice):
     
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def StartPoll(self, sF=None):
+    def StartPoll(self):
         
-        success              = True
-        useGivenStreamFolder = False
-        
-        # check if stream folder was given
-        if sF:
-            if coreUtils.IsAccessible(sF, 'write'):
-                self._streamFolder = sF
-                useGivenStreamFolder = True
-            
-            # if not, try to create new folders
-        if not sF or not useGivenStreamFolder:
-            sF = self._baseStreamFolder
-            if coreUtils.SafeMakeDir(sF, self):
-                sF += '/session_' + self.coreStartTime + '/'
-                if coreUtils.SafeMakeDir(sF, self):
-                    sF += 'stream%04d/' % self._strmFldrCnt
-                    if coreUtils.SafeMakeDir(sF, self):
-                        # set new stream folder to class var
-                        self._streamFolder = sF
-                        # increment folder counter for multiple streams
-                        self._strmFldrCnt += 1
-                    else:
-                        success = False
-            
-
-        if success:
-            
-            # create new processor object
-            self._dataProcessor = DataProcessor()
-            self._dataProcessor.Start()
+        if self.CreateNewStreamFolder():
             
             # initialize new thread
             self._pollThread = threading.Thread(target=self._PollData)
@@ -201,11 +172,9 @@ class Hf2Core(CoreDevice):
             
             self._recordString = 'Recording...'
             
-            
-#            self._debugThread = threading.Thread(target=self.DebugDioThread)
-#            self._debugThread.start()
+            return True
         
-        return success
+        return False
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -218,12 +187,9 @@ class Hf2Core(CoreDevice):
             self._pollThread.join()
 #            self._debugThread.join()
 
-            self._dataProcessor.Stop()
+            self.Stop()
             
-            # write last part of the data to disk
-            self.WriteMatFileToDisk()
-            
-            self._dataProcessor.__del__()
+#            self._dataProcessor.__del__()
             
             # reset file counter for next run
             self._strmFlCnt = 0
@@ -270,6 +236,8 @@ class Hf2Core(CoreDevice):
             # clear old data from polling buffer
             self.comPort.sync()
             
+        if self.comPortStatus or __simulationMode__:
+            
             while self._poll:
                 
                 # lock thread to safely process
@@ -286,12 +254,12 @@ class Hf2Core(CoreDevice):
                 # fetch data
                 # block for 1 ms, timeout 10 ms, throw error if data is lost and return flat dictionary
                 # NOTE: poll downloads all data since last poll, sync or subscription
-#                if __simulationMode__:
-#                    newData = coreUtils.DataGen(6, 1000, 10)
-#                else:
-                newData = self.comPort.poll(10e-3, 10, 0x04, True)
+                if __simulationMode__:
+                    newData = coreUtils.DataGen(6, 10000, 30)
+                else:
+                    newData = self.comPort.poll(10e-3, 10, 0x04, True)
                     
-                self._dataProcessor.UpdateData(newData)
+                self.UpdateData(newData)
                 
                 # get all demods in data stream
 #                for key in dataBuf.keys():
@@ -340,12 +308,12 @@ class Hf2Core(CoreDevice):
                 
             
                 # check, according to strorage mode, if it's necessary to store a new file
-                if self._storageMode == 'fileSize':
-                    if (self._dataProcessor.GetDataSize()//1024**2) > (self._maxStreamFileSize-1):
-                        self._dataProcessor.Stop()
-                        self.WriteMatFileToDisk()
-                        self._dataProcessor.ResetData()
-                        self._dataProcessor.Start()
+#                if self._storageMode == 'fileSize':
+#                    if (self._dataProcessor.GetDataSize()//1024**2) > (self._maxStreamFileSize-1):
+#                        self._dataProcessor.Stop()
+#                        self.WriteMatFileToDisk()
+#                        self._dataProcessor.ResetData()
+#                        self._dataProcessor.Start()
                         
 #                elif self._storageMode == 'recTime':
 #                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
@@ -425,41 +393,41 @@ class Hf2Core(CoreDevice):
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def SetBaseStreamFolder(self, baseStreamFolder):
-        
-        if coreUtils.IsAccessible(baseStreamFolder, 'write'):
-            self._baseStreamFolder = baseStreamFolder
-            self._streamFolder     = baseStreamFolder
-        else:
-            raise Exception('ERROR: Cannot access given path for writing Matlab files!')
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def SetStorageMode(self, storageMode):
-        
-        if storageMode in self.__storageModes__:
-            self._storageMode = storageMode
-        else:
-            raise Exception('Unsupported storage mode: %s' % storageMode)
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def SetStreamFileSize(self, fileSize):
-        
-        assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
-        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
-        
-        self._maxStreamFileSize = fileSize
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def SetStreamTime(self, streamTime):
-        
-        assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
-        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
-        
-        self._maxStreamTime = streamTime
-            
+#    def SetBaseStreamFolder(self, baseStreamFolder):
+#        
+#        if coreUtils.IsAccessible(baseStreamFolder, 'write'):
+#            self._baseStreamFolder = baseStreamFolder
+#            self._streamFolder     = baseStreamFolder
+#        else:
+#            raise Exception('ERROR: Cannot access given path for writing Matlab files!')
+#        
+#### -------------------------------------------------------------------------------------------------------------------------------
+#    
+#    def SetStorageMode(self, storageMode):
+#        
+#        if storageMode in self.__storageModes__:
+#            self._storageMode = storageMode
+#        else:
+#            raise Exception('Unsupported storage mode: %s' % storageMode)
+#        
+#### -------------------------------------------------------------------------------------------------------------------------------
+#    
+#    def SetStreamFileSize(self, fileSize):
+#        
+#        assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
+#        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
+#        
+#        self._maxStreamFileSize = fileSize
+#        
+#### -------------------------------------------------------------------------------------------------------------------------------
+#    
+#    def SetStreamTime(self, streamTime):
+#        
+#        assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
+#        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
+#        
+#        self._maxStreamTime = streamTime
+#            
             
             
 ###############################################################################
