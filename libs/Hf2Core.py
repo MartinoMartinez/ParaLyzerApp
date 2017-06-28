@@ -47,24 +47,12 @@ class Hf2Core(CoreDevice, DataProcessor):
         
     __recordingDevices__ = '/demods/*/sample'   # device ID is added later...
     
-    # default parameters for storing determination
-#    __maxStrmFlSize__    = 10     # 10 MB
-#    __maxStrmTime__      = 0.5    # 30 s
-#    
-#    # supported stream modes
-#    __storageModes__     = ['fileSize', 'recTime', 'tilterSync']
-    
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def __init__(self, **flags):
         
-        DataProcessor.__init__(self, **flags)
-        
         # store chosen device name here
         self.deviceName = None
-        
-        # dictionary to store all demodulator results
-#        self._demods = {}
         
         # to stop measurement
         # initially no measurement is running
@@ -85,27 +73,6 @@ class Hf2Core(CoreDevice, DataProcessor):
                     'invalidtimestamp': False
                 }
         
-        # variables to count streams (folder + files)
-#        self._baseStreamFolder = baseStreamFolder
-#        self._streamFolder     = baseStreamFolder
-#        self._strmFlCnt        = 0
-#        self._strmFldrCnt      = 0
-        
-        # check if folder is available, if not create
-#        coreUtils.SafeMakeDir(self._baseStreamFolder, self)
-#        
-#        if storageMode in self.__storageModes__:
-#            self._storageMode = storageMode
-#        else:
-#            raise Exception('Unsupported storage mode: %s' % storageMode)
-#            
-#        # check for ambiguous setup
-#        if 'streamFileSize' in flags.keys() and 'streamTime' in flags.keys():
-#            raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
-#        else:
-#            self.SetStreamFileSize( flags.get( 'streamFileSize', self.__maxStrmFlSize__ ) )
-#            self.SetStreamTime    ( flags.get( 'streamTime'    , self.__maxStrmTime__   ) )
-        
         flags['detectFunc'] = self.DetectDeviceAndSetupPort
         
         CoreDevice.__init__(self, **flags)
@@ -116,6 +83,10 @@ class Hf2Core(CoreDevice, DataProcessor):
             __simulationMode__ = True
             self.deviceName = 'Simulator'
             self.logger.warning('Simulation mode enabled!')
+            
+        flags['matlabKey'] = self.deviceName
+        
+        DataProcessor.__init__(self, **flags)
     
 ### -------------------------------------------------------------------------------------------------------------------------------
         
@@ -163,6 +134,9 @@ class Hf2Core(CoreDevice, DataProcessor):
         
         if self.CreateNewStreamFolder():
             
+            # start processor loop
+            self.Start()
+            
             # initialize new thread
             self._pollThread = threading.Thread(target=self._PollData)
             # once polling thread is started loop is running till StopPoll() was called
@@ -188,8 +162,6 @@ class Hf2Core(CoreDevice, DataProcessor):
 #            self._debugThread.join()
 
             self.Stop()
-            
-#            self._dataProcessor.__del__()
             
             # reset file counter for next run
             self._strmFlCnt = 0
@@ -261,68 +233,6 @@ class Hf2Core(CoreDevice, DataProcessor):
                     
                 self.UpdateData(newData)
                 
-                # get all demods in data stream
-#                for key in dataBuf.keys():
-#                    
-#                    # check if demodulator is already in dict, add if not (with standard structure)
-#                    if key not in self._demods.keys():
-#                        self._demods.update({key: self._GetStandardRecordStructure()})
-#                    
-#                    # fill structure with new data
-#                    for k in self._demods[key].keys():
-#                        if k in dataBuf[key].keys():
-#                            self._demods[key][k] = sp.concatenate( [self._demods[key][k], dataBuf[key][k]] )
-#                            
-#                        # save flags for later use in GUI
-#                        # look at dataloss and invalid time stamps
-#                        if k in ['dataloss', 'invalidtimestamp'] and dataBuf[key][k]:
-#                            self.logger.warning('%s was recognized! Data might be corrupted!' % k)
-#                            self._recordFlags[k] = True
-#   
-#   
-#                self._demods[key]['ePair'] = DioByteToChamber(self._demods[key]['dio'])
-                    
-########################################################
-#   --- THIS IS HERE FOR SIMPLE PLOTTING REASONS ---   #
-########################################################
-                    
-#                    # get data from current demodulator
-#                    x = dataBuf[key]['x']
-#                    y = dataBuf[key]['y']
-#                    # calc abs value from real+imag
-#                    r = np.sqrt(x**2 + y**2)
-#                    
-#                    # check if demodulator is already in dict, add if not (with standard structure)
-#                    if key not in self.demods.keys():
-#                        self.demods.update({key: self.GetStandardHf2Dict()})
-#                    
-#                        # store first timestamp as a reference, if not available
-#                        if self.demods[key]['timeRef'] == -1:
-#                            self.demods[key]['timeRef'] = dataBuf[key]['timestamp'][0]
-#                    
-#                    # calculate real time with reference and clock base and append to array
-#                    self.demods[key]['time'] = np.concatenate([self.demods[key]['time'], (dataBuf[key]['timestamp'] - self.demods[key]['timeRef']) / 210e6])
-#                    
-#                    # append data points
-#                    self.demods[key]['r'] = np.concatenate([self.demods[key]['r'], r])
-                
-            
-                # check, according to strorage mode, if it's necessary to store a new file
-#                if self._storageMode == 'fileSize':
-#                    if (self._dataProcessor.GetDataSize()//1024**2) > (self._maxStreamFileSize-1):
-#                        self._dataProcessor.Stop()
-#                        self.WriteMatFileToDisk()
-#                        self._dataProcessor.ResetData()
-#                        self._dataProcessor.Start()
-                        
-#                elif self._storageMode == 'recTime':
-#                    if ( time() - streamTime ) / 60 > self._maxStreamTime:
-#                        self.WriteMatFileToDisk()
-#                        streamTime = time()
-#                        
-#                elif self._storageMode == 'tilterSync':
-#                    None
-                
                 # critical stuff is done, release lock
                 self._pollLocker.release()
             
@@ -335,98 +245,16 @@ class Hf2Core(CoreDevice, DataProcessor):
     
     def GetRecordFlags(self):
         return self._recordFlags
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def _GetStandardRecordStructure(self):
-        return {
-                    'x'        : sp.array([]),
-                    'y'        : sp.array([]),
-                    'timestamp': sp.array([]),
-                    'frequency': sp.array([]),
-#                    'phase':     np.array([]),
-                    'dio'      : sp.array([]),
-                    'ePair'    : sp.array([])           # to decode the DIO byte from HF2 into electrode pair
-#                    'auxin0':    np.array([]),
-#                    'auxin1':    np.array([])
-                    
-# just for the test with plotting
-#                    'r': np.array([]),
-#                    'time': np.array([]),
-#                    'timeRef': -1
-                }
     
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def GetCurrentStreamFolder(self):
         return self._streamFolder
-    
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def WriteMatFileToDisk(self):
-        
-        # create this just for debugging...
-#        outFileBuf = {'demods': []}
-#        
-#        for key,item in self._demods.keys():
-#            buf = {}
-#            for k,i in item.items():
-#                buf[k] = i
-#            outFileBuf['demods'].append(buf)
-#            
-#        sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: outFileBuf})
-        sp.io.savemat(self._streamFolder+'stream_%05d.mat'%self._strmFlCnt, {'%s'%self.deviceName: self._dataProcessor._data})
-        
-        # memory leak was found...try to fix it
-        del self._demods
-        
-        # clear buffer for next recording
-        self._demods = {}
-
-        # increment
-        self._strmFlCnt += 1
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def GetRecordingString(self):
         return self._recordString
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-#    def SetBaseStreamFolder(self, baseStreamFolder):
-#        
-#        if coreUtils.IsAccessible(baseStreamFolder, 'write'):
-#            self._baseStreamFolder = baseStreamFolder
-#            self._streamFolder     = baseStreamFolder
-#        else:
-#            raise Exception('ERROR: Cannot access given path for writing Matlab files!')
-#        
-#### -------------------------------------------------------------------------------------------------------------------------------
-#    
-#    def SetStorageMode(self, storageMode):
-#        
-#        if storageMode in self.__storageModes__:
-#            self._storageMode = storageMode
-#        else:
-#            raise Exception('Unsupported storage mode: %s' % storageMode)
-#        
-#### -------------------------------------------------------------------------------------------------------------------------------
-#    
-#    def SetStreamFileSize(self, fileSize):
-#        
-#        assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
-#        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
-#        
-#        self._maxStreamFileSize = fileSize
-#        
-#### -------------------------------------------------------------------------------------------------------------------------------
-#    
-#    def SetStreamTime(self, streamTime):
-#        
-#        assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
-#        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
-#        
-#        self._maxStreamTime = streamTime
 #            
             
             
