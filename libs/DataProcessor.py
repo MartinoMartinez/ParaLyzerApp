@@ -169,10 +169,10 @@ class DataProcessor(threading.Thread, DataSaver):
     
     __lockInAmpClock__ = 210e6
     
-    def __init__(self, processFunction=None, **flags):
+    def __init__(self, **flags):
         
         DataSaver.__init__(self, **flags)
-        threading.Thread.__init__(self, target=self._DataProcessor)
+        threading.Thread.__init__(self)
         
         self._data                 = None
         self._dataSize             = 0
@@ -183,9 +183,6 @@ class DataProcessor(threading.Thread, DataSaver):
         self._tRef                 = -1   # not used at the moment but could be used to replace in data structure -> consider callback functionality
 
         self._ResetData()
-        
-        # either use user defined process function or build-in
-        self._processFunction = processFunction if processFunction else self._ProcessFunction
         
         # pipeline for new incoming data
         # gets processed in an ordered fashion in _DataProcessor
@@ -222,7 +219,7 @@ class DataProcessor(threading.Thread, DataSaver):
         
 ### --------------------------------------------------------------------------------------------------
 
-    def _DataProcessor(self):
+    def run(self):
         
         # run as long as user puts new data
         while self._activeProcessor:
@@ -237,7 +234,7 @@ class DataProcessor(threading.Thread, DataSaver):
             else:
                 st = perf_counter()
 
-                self._ProcessFunction(newData)
+                self.DataProcessor(newData)
                 
                 # indicate that current task was done
                 self._newDataQueue.task_done()
@@ -258,7 +255,7 @@ class DataProcessor(threading.Thread, DataSaver):
         
 ### --------------------------------------------------------------------------------------------------
                     
-    def _ProcessFunction(self, newData):
+    def DataProcessor(self, newData):
         
         # estimate size
         # NOTE: several parts are missing here, like r, psd and motility - add them later to make it faster
