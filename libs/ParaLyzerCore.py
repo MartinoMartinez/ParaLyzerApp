@@ -74,15 +74,15 @@ class ParaLyzerCore(Logger):
         
 ### -------------------------------------------------------------------------------------------------------------------------------
         
-    def __del__(self):
-    
-        # deinit device objects
-        self.arduino.__del__()
-        self.hf2.__del__()
-        self.tilter.__del__()
-        
-        # deinit logger
-        Logger.__del__(self)
+    # def __del__(self):
+    #
+    #     # deinit device objects
+    #     self.arduino.__del__()
+    #     self.hf2.__del__()
+    #     self.tilter.__del__()
+    #
+    #     # deinit logger
+    #     Logger.__del__(self)
         
         
                 

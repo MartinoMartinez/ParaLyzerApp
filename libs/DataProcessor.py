@@ -202,7 +202,8 @@ class DataProcessor(threading.Thread, DataSaver):
         self.Stop()
         
         # wait for process watcher
-        self.join()
+        if self.isAlive():
+            self.join()
         
 ### --------------------------------------------------------------------------------------------------
     

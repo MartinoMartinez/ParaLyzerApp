@@ -13,6 +13,7 @@ from tkinter import filedialog
 
 from time import sleep
 from datetime import datetime
+from copy import deepcopy
 
 import re
 
@@ -31,7 +32,7 @@ class ParaLyzerApp(Logger, StatusBar):
     # here for initial settings
     # and in lbl_txts again
     # ... this dictionary is not supposed to change during execution
-    _lbl_txts = {
+    __lbl_txts__ = {
             'hf2': 'No HF2LI detected!',
             'ard': 'No Arduino detected!',
             'cam': 'No Camera detected!',
@@ -48,13 +49,20 @@ class ParaLyzerApp(Logger, StatusBar):
             'nmo': 'M-',
             'ppa': 'P+',
             'npa': 'P-',
+            'swd': 'Switch Delay:'
         }
        
 ### -------------------------------------------------------------------------------------------------------------------------------
        
     def __init__(self, master):
         # create general face of the app
-        
+
+        # forbid resize by user
+        master.resizable(width=False, height=False)
+
+        # set window title
+        master.title('ParaLyzerApp')
+
         # store core start time...for creating folders and files
         self._appStartTime = coreUtils.GetDateTimeAsString()
         self._logFile      = 'session_' + self._appStartTime + '.log'
@@ -63,7 +71,7 @@ class ParaLyzerApp(Logger, StatusBar):
         Logger.__init__(self, logFile=self._logFile)
         
         self.logger.info('Starting program...')
-        
+
         self.master = master
         
         self.frms       = {}
@@ -100,24 +108,7 @@ class ParaLyzerApp(Logger, StatusBar):
                     'rts': 'Read Config'            # update tilter setup in App
                 }
 
-        self.lbl_txts = {
-                    'hf2': 'No HF2LI detected!',
-                    'ard': 'No Arduino detected!',
-                    'cam': 'No Camera detected!',
-                    'til': 'No Tilter detected!',
-                    'cfg': 'Not found',
-                    'chc': 'Not found',
-                    'swc': 'Not found',
-                    'stf': 'Not found',
-                    'cnt': 'Cint:',
-                    'via': 'Vint:',
-                    'pan': 'A+',
-                    'nan': 'A-',
-                    'pmo': 'M+',
-                    'nmo': 'M-',
-                    'ppa': 'P+',
-                    'npa': 'P-',
-                }
+        self.lbl_txts = deepcopy(self.__lbl_txts__)
         
         self.rbtn_txts = {
                     'std': 'Count + Viability',
@@ -132,7 +123,7 @@ class ParaLyzerApp(Logger, StatusBar):
                     'utr': 'Use tilter',
                     'sac': 'Select all',
                     'ofa': 'One for all',
-                    'scv': 'Same cnt + via',
+                    # 'scv': 'Same cnt + via',
                     'swt': 'Sync with tilter',
                     'prc': 'Pause recording'
                 }
@@ -275,14 +266,9 @@ class ParaLyzerApp(Logger, StatusBar):
         
         # radio buttons for selecting the switching scheme
         self.CreateRadioButton(self.frms['swsr'], 'sws', ['std', 'cnt', 'via'], 'std', anchor=tk.W)
-        # special treatment for the last button
-        # put another left to it...
-#        self.rbtns['act'].pack( anchor=tk.W, side=tk.LEFT )
 
         # for user defined serve another input scheme via dialog opened by button
         self.CreateButton( self.frms['swsw'], 'wac', anchor=tk.CENTER)
-#        self.btns['wac'].place(relx=.5, rely=.5)
-#        self.btns['usr'].pack()
         
         
         
@@ -315,30 +301,33 @@ class ParaLyzerApp(Logger, StatusBar):
         scv_frm = tk.Frame(scv_swt_frm)
         scv_frm.pack(anchor=tk.N, side=tk.LEFT)
         
-        self.CreateCheckButton( scv_frm, 'scv' )
+        # self.CreateCheckButton( scv_frm, 'scv' )
         
         # synchronization with tilter
-        # only give waittime for counting
+        # only give wait time for counting
         swt_frm = tk.Frame(scv_swt_frm)
         swt_frm.pack(anchor=tk.N)
         
         self.CreateCheckButton( swt_frm, 'swt', anchor=tk.W )
         self.CreateCheckButton( swt_frm, 'prc', anchor=tk.W )
         
+        self.CreateLabel    ( swt_frm, 'swd', side=tk.LEFT, padx=2                                 )
+        self.CreateUserEntry( swt_frm, 'swd', width=6, padx=2, justify=tk.RIGHT, state=tk.DISABLED )
         
+
         # enable user to change base timings
         # either mm:ss, ms or us
-        cbt_frm = tk.Frame(ofa_scv_swt_frm)
-        cbt_frm.pack()
-        
-        self.optm_opts['cbt'] = ['mm:ss', 'ms', 'us']
-        self.optm_vals['cbt'] = tk.StringVar(value='mm:ss')
-        
-        # trace wants a callback with nearly useless parameters, fixing with lambda.
-        self.optm_vals['cbt'].trace('w', lambda nm, idx, mode, key='cbt', var=self.optm_vals['cbt']: self.onComboChange(key, var))
-        
-        self.optm['cbt'] = tk.OptionMenu(cbt_frm, self.optm_vals['cbt'], *self.optm_opts['cbt'])
-        self.optm['cbt'].pack(anchor=tk.SE, pady=10)
+        # cbt_frm = tk.Frame(ofa_scv_swt_frm)
+        # cbt_frm.pack()
+        #
+        # self.optm_opts['cbt'] = ['mm:ss', 'ms', 'us']
+        # self.optm_vals['cbt'] = tk.StringVar(value='mm:ss')
+        #
+        # # trace wants a callback with nearly useless parameters, fixing with lambda.
+        # self.optm_vals['cbt'].trace('w', lambda nm, idx, mode, key='cbt', var=self.optm_vals['cbt']: self.onComboChange(key, var))
+        #
+        # self.optm['cbt'] = tk.OptionMenu(cbt_frm, self.optm_vals['cbt'], *self.optm_opts['cbt'])
+        # self.optm['cbt'].pack(anchor=tk.SE, pady=10)
         
         
         
@@ -451,14 +440,14 @@ class ParaLyzerApp(Logger, StatusBar):
         # remove certain items to not cause problems with pack
         kwargs, args = self.PopObjectArgs(**kwargs)
         
-        self.lbls[key] = tk.Label( master, text=self._lbl_txts[key], **args )
+        self.lbls[key] = tk.Label( master, text=self.__lbl_txts__[key], **args )
         self.lbls[key].pack(**kwargs)
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def CreateLabels(self, master, keys, **kwargs):
         for key in keys:
-            if key in self._lbl_txts.keys():
+            if key in self.__lbl_txts__.keys():
                 self.CreateLabel(master, key, **kwargs)
             else:
                 raise Exception('%s not in self._lbl_txts' % key)
@@ -517,7 +506,7 @@ class ParaLyzerApp(Logger, StatusBar):
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def CreateUserEntries(self, master, keys, defaults=['mm:ss'], **kwargs):
+    def CreateUserEntries(self, master, keys, defaults=[''], **kwargs):
         
         if len(defaults) == 1:
             defaults = defaults * len(keys)
@@ -527,7 +516,7 @@ class ParaLyzerApp(Logger, StatusBar):
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def CreateUserEntry(self, master, key, default='mm:ss', **kwargs):
+    def CreateUserEntry(self, master, key, default='0.0', **kwargs):
         
         # remove certain items to not cause problems with pack
         kwargs, args = self.PopObjectArgs(**kwargs)
@@ -580,7 +569,7 @@ class ParaLyzerApp(Logger, StatusBar):
                 
             # take default value
             else:
-                self.lbl_txts[key] = self._lbl_txts[key]
+                self.lbl_txts[key] = self.__lbl_txts__[key]
             
             self.UpdateLabelText(key)
             
@@ -675,7 +664,7 @@ class ParaLyzerApp(Logger, StatusBar):
     
     def UpdateEntryStates(self):
                 
-        for entr_key in ['cnti', 'viai', 'cntofa', 'viaofa']:
+        for entr_key in ['cnti', 'viai', 'cntofa', 'viaofa', 'swd']:
             # get state for each entry and enable/disable accordingly
             if self.CheckEnableEntries(entr_key):
                 state = tk.NORMAL
@@ -779,13 +768,6 @@ class ParaLyzerApp(Logger, StatusBar):
                         tString = self.entrs[key+entrKey].get()
                     elif key in ['cntofa', 'viaofa']:
                         tString = self.entrs[key].get()
-                
-                    # check if still default text according to check current combo box selection
-                    if tString in self.optm_opts['cbt']:
-                        if key in ['cnti', 'viai']:
-                            self.entrs[key+entrKey].configure(bg=self.wrongEntryColor)
-                        elif key in ['cntofa', 'viaofa']:
-                            self.entrs[key].configure(bg=self.wrongEntryColor)
                         
         # state not checked
         # reset colors
@@ -829,47 +811,64 @@ class ParaLyzerApp(Logger, StatusBar):
     
     def ValidateTime(self, event, key):
         
-        tVar   = event.widget.get()
-        result = ''
+        expoChars = ('e','-','+')
+    
+        val = event.widget.get()
         
-        if any([k in key for k in ['cnti', 'viai', 'cntofa', 'viaofa']]):#, 'ppa', 'npa']]):
+        # use generator construct to find key in list of keys since they additionally contain an index
+        if any([k in key for k in ['cnti', 'viai', 'cntofa', 'viaofa']]):
             
-            timeBase = self.optm_vals['cbt'].get()
+            # try to convert to float
+            try:
+                float(val)
+            except ValueError:
+                # if it didn't work we should figure our if user wants to use exponential/scientific style
+                # we still need to check if the characters occure multiple time and avoid that
+                if not val.endswith(expoChars) or any([val.count(c)>1 for c in expoChars]):
+                    event.widget.delete(len(val)-1, len(val))
+            
+#            timeBase = self.optm_vals['cbt'].get()
             
             # check for correct input
             # depending on time base use different patterns
-            if timeBase == 'mm:ss':
-                result = re.match('(^[0-9]{1,2}:[0-9]{1,2})|(^[0-9]{0,2}:?)', tVar).group()
-            elif timeBase == 'ms' or 'us':
-                result = re.match('^[0-9]{0,3}', tVar).group()
+#            if timeBase == 'mm:ss':
+#                result = re.match('(^[0-9]{1,2}:[0-9]{1,2})|(^[0-9]{0,2}:?)', tVar).group()
+#            elif timeBase == 'ms' or 'us':
+#                result = re.match('^[0-9]{0,3}', tVar).group()
             
             # either print result to the entry box or delete it completely
-            if result != tVar:
-                event.widget.delete( 0, tk.END )
-                event.widget.insert( 0, result )
-            elif result == '':
-                event.widget.delete( 0, tk.END )
+#            if result != tVar:
+#                event.widget.delete( 0, tk.END )
+#                event.widget.insert( 0, result )
+#            elif result == '':
+#                event.widget.delete( 0, tk.END )
             
             # with focus reset bg color if it was highlighted before
-            if event.type == '9' and tVar in self.optm_opts['cbt'] and event.widget.cget('bg') != 'SystemWindow':
+            if event.type == '9' and event.widget.cget('bg') != 'SystemWindow':
                 event.widget.configure(bg='SystemWindow')
         
             elif event.type == '10':
                 #if no value was entered, set it to zero
-                if result == '':
-                    event.widget.delete( 0, tk.END   )
-                    event.widget.insert( 0, timeBase )
+                if len(val) == 0:
+                    event.widget.delete( 0, tk.END )
+                    event.widget.insert( 0, '0.0'  )
                         
                 # check if seconds > 59 were entered...change
-                elif result.find(':') == -1:
-                    result = int(result)
-                    if result > 59:
-                        result = [1, result-60]
-                        event.widget.delete( 0, tk.END                           )
-                        event.widget.insert( 0, '%s:%s' % (result[0], result[1]) )
+#                elif result.find(':') == -1:
+#                    result = int(result)
+#                    if result > 59:
+#                        result = [1, result-60]
+#                        event.widget.delete( 0, tk.END                           )
+#                        event.widget.insert( 0, '%s:%s' % (result[0], result[1]) )
                         
                         
-#        elif key in ['pan', 'nan', 'pmo', 'nmo']:
+        elif key in ['pan', 'nan', 'pmo', 'nmo']:
+            
+            # try to convert to integer
+            try:
+                int(val)
+            except ValueError:
+                event.widget.delete(len(val)-1, len(val))
 #            
 #            if key == 'pmo':
 #                result = re.match('', tVar).group()
@@ -887,18 +886,19 @@ class ParaLyzerApp(Logger, StatusBar):
         # read out current status of radio buttons
         rbtn_sel  = self.rbnt_vals['sws'].get()
         ofa_ckbtn = self.ckbtn_vals['ofa'].get()
-        scv_ckbtn = self.ckbtn_vals['scv'].get()
         swt_ckbtn = self.ckbtn_vals['swt'].get()
         
         if 'cnti' in key:
             enable = ( ('via' or 'usr') not in rbtn_sel and ofa_ckbtn != 1 and swt_ckbtn != 1 )
         elif 'viai' in key:
-            enable = ( ('cnt' or 'usr') not in rbtn_sel and ofa_ckbtn != 1 and scv_ckbtn != 1 and swt_ckbtn != 1 )
+            enable = ( ('cnt' or 'usr') not in rbtn_sel and ofa_ckbtn != 1 and swt_ckbtn != 1 )
         elif 'cntofa' in key:
             enable = ( ('via' or 'usr') not in rbtn_sel and (ofa_ckbtn == 1 or swt_ckbtn == 1) )
         elif 'viaofa' in key:
-            enable = ( ('cnt' or 'usr') not in rbtn_sel and scv_ckbtn != 1 and (ofa_ckbtn == 1 or swt_ckbtn == 1) )
-            
+            enable = ( ('cnt' or 'usr') not in rbtn_sel and (ofa_ckbtn == 1 or swt_ckbtn == 1) )
+        elif 'swd' in key:
+            enable = swt_ckbtn
+        
         return enable
         
         
@@ -910,24 +910,9 @@ class ParaLyzerApp(Logger, StatusBar):
         
         for key, val in tStrings.items():
             mins, secs = coreUtils.GetMinSecFromString(val)
-            tNum[key] = mins*60 + secs
+            tNum[key] = int((mins*60 + secs) * 1e6)
             
         return tNum
-        
-        
-### -------------------------------------------------------------------------------------------------------------------------------
-    
-    def CorrectForBaseTime(self, tNum, base):
-        
-        interval = {}
-        
-        for key, val in tNum.items():
-            if base == 'mm:ss':
-                interval[key] = int(tNum[key] * 1e6)
-            elif base == 'ms':
-                interval[key] = int(tNum[key] * 1e3)
-                
-        return interval
        
 ### -------------------------------------------------------------------------------------------------------------------------------
         
@@ -970,7 +955,7 @@ class ParaLyzerApp(Logger, StatusBar):
         
     def UpdateELectrodePairs(self):
             
-        timeBase = self.optm_vals['cbt'].get()
+#        timeBase = self.optm_vals['cbt'].get()
         success  = True
 
         self.paraLyzerCore.arduino.UndefineAllElectrodePairs()
@@ -988,42 +973,32 @@ class ParaLyzerApp(Logger, StatusBar):
                     
                     # get time string from particular user entry, depending on radio/check buttons
                     tStrings = self.GetTimeFromUserEntry(entryId)
+                    interval = self.GetTimeFromString(tStrings)
                     
-                    # only proceed if all entries have a valid value
-                    if not timeBase in tStrings.values():
+                    # process counting interval
+                    if 'cnti' in interval.keys():
+                        # always odd numbers are counting pairs
+                        ePair = int(entryId)*2+1
+                        # define new electrode pair with current setup
+                        self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['cnti'])
                         
-                        tNums    = self.GetTimeFromString(tStrings)
-                        interval = self.CorrectForBaseTime(tNums, timeBase)
+                        # in case it's needed by SetupArduino for delay events
+                        self.streamFlags['switchDelay'] = float(self.GetTimeFromUserEntry('swd'))
                         
-                        # process counting interval
-                        if 'cnti' in tNums.keys():
-                            # always odd numbers are counting pairs
-                            ePair = int(entryId)*2+1
-                            # define new electrode pair with current setup
-                            self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['cnti'])
-                            
-                            # in case it's needed by SetupArduino for delay events
-                            self.streamFlags['switchDelay'] = 10#tNums['cnti']
-                            
-                        # process viability interval
-                        if 'viai' in tNums.keys():
-                            # always even numbers are viability pairs
-                            ePair = int(entryId)*2
-                            # define new electrode pair with current setup
-                            self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['viai'])
-                            
-                            # in case it's needed by SetupArduino for delay events
-#                            self.streamFlags['stopDelay'] = tNums['viai']
-                                
-                    # in case there was a wrong input time
-                    else:
-                        success = False
-                        break
+                    # process viability interval
+                    if 'viai' in interval.keys():
+                        # always even numbers are viability pairs
+                        ePair = int(entryId)*2
+                        # define new electrode pair with current setup
+                        self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['viai'])
+                        
+                        # in case it's needed by SetupArduino for delay events
+#                        self.streamFlags['stopDelay'] = tNums['viai']
                             
                         
         # check if values are correct
-        if not success:
-            messagebox.showerror('Error', 'Please enter a valid value in the highlighted fields.')
+#        if not success:
+#            messagebox.showerror('Error', 'Please enter a valid value in the highlighted fields.')
                     
         
 
@@ -1303,7 +1278,7 @@ class ParaLyzerApp(Logger, StatusBar):
             elif key == 'prc':
                 None
             
-                
+        # a certain chamber was selected
         elif 'id' in key:
             # inform start button procedure that there was a change
             self.ePairsChanged = True
@@ -1328,6 +1303,7 @@ class ParaLyzerApp(Logger, StatusBar):
                 if reset:
                     self.somethingsSelected = False
                     
+        # select all chambers
         elif key == 'sac':
             
             # inform start button procedure that there was a change
@@ -1348,9 +1324,6 @@ class ParaLyzerApp(Logger, StatusBar):
                 self.somethingsSelected = True
             else:
                 self.somethingsSelected = False
-                
-                
-                    
                     
         # enable or disable entries according to all check boxes and radio buttons
         self.UpdateEntryStates()
@@ -1441,12 +1414,6 @@ class ParaLyzerApp(Logger, StatusBar):
 if __name__ == '__main__':
     
     master = tk.Tk()
-    
-    # forbid resize by user
-    master.resizable(width=False, height=False)
-    
-    # set window title
-    master.title('ParaLyzer App')
     
     # initialize window
     ParaLyzerApp(master)

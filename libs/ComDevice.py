@@ -118,7 +118,7 @@ class ComDevice:
     
     def SetupSerialPort(self, flags={}):
     
-        if isinstance(self.comPortInfo, serial.tools.list_ports_common.ListPortInfo):
+        if self.comPortInfo:
             
             coreUtils.SafeLogger('info', 'Initializing serial port.', self)
             
