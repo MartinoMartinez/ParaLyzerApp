@@ -165,14 +165,13 @@ class DataSaver:
 globalTimeList = []
     
 
-class DataProcessor(threading.Thread, DataSaver):
+class DataProcessor(DataSaver):
     
     __lockInAmpClock__ = 210e6
     
     def __init__(self, **flags):
         
         DataSaver.__init__(self, **flags)
-        threading.Thread.__init__(self)
         
         self._data                 = None
         self._dataSize             = 0
@@ -187,7 +186,9 @@ class DataProcessor(threading.Thread, DataSaver):
         # pipeline for new incoming data
         # gets processed in an ordered fashion in _DataProcessor
         self._newDataQueue = queue.Queue()
-        
+
+        self._queueThread = None
+
         # thread condition to sleep while no data is available
         self._newDataEvent = threading.Event()
         
@@ -200,11 +201,7 @@ class DataProcessor(threading.Thread, DataSaver):
         
         # call stop to make sure all data chunks in the queue have been processed
         self.Stop()
-        
-        # wait for process watcher
-        if self.isAlive():
-            self.join()
-        
+
 ### --------------------------------------------------------------------------------------------------
     
     def _SaveData(self):
@@ -220,7 +217,7 @@ class DataProcessor(threading.Thread, DataSaver):
         
 ### --------------------------------------------------------------------------------------------------
 
-    def run(self):
+    def _Dequeuer(self):
         
         # run as long as user puts new data
         while self._activeProcessor:
@@ -319,9 +316,9 @@ class DataProcessor(threading.Thread, DataSaver):
 
                         # OR values that need a reference first
                         elif key == 't':
-                        
                             if self._data[demod]['tRef'] != -1:
-                                self._data[demod][key][k] = sp.concatenate( [self._data[demod][key][k], (data['timestamp'][slices]-self._data[demod]['tRef'])] )
+                                t = (data['timestamp'][slices] - self._data[demod]['tRef']) / self.__lockInAmpClock__
+                                self._data[demod][key][k] = sp.concatenate( [self._data[demod][key][k], t] )
                                      
 
                         elif key == 'motility':
@@ -352,8 +349,10 @@ class DataProcessor(threading.Thread, DataSaver):
         
         # enable data procesor to run
         self._activeProcessor = True
+        # get new thread instance
+        self._queueThread = threading.Thread(target=self._Dequeuer)
         # start thread
-        self.start()
+        self._queueThread.start()
         
         if self._storageMode == 'recordTime':
             self._startTime = time()
@@ -371,6 +370,10 @@ class DataProcessor(threading.Thread, DataSaver):
         # only to exit the while loop and finish the thread
         self._newDataEvent.set()
         self._newDataEvent.clear()
+
+        # wait for process watcher
+        if self._queueThread:
+            self._queueThread.join()
         
         # here we are sure nothing is running
         # so we can save the rest of the data

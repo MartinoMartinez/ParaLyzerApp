@@ -280,4 +280,12 @@ if __name__ == '__main__':
     
     hf2.StopPoll()
     
+    print('Starting again...')
+    
+    hf2.StartPoll()
+    
+    sleep(1)
+    
+    hf2.StopPoll()
+    
     hf2.__del__()
