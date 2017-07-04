@@ -28,14 +28,16 @@ class DataSaver:
     # default parameters for storing determination
     __maxStrmFlSize__    = 10     # 10 MB
     __fileSizeScaler__   = 'MB'
-    __maxStrmTime__      = 0.5    # 30 s
+    __maxStrmTime__      = 5      # 5 min
     __timeLenScaler__    = 'min'
     
     # supported stream modes
     __storageModes__     = ['fileSize', 'recordTime', 'eventSync']
     
-    def __init__(self, matlabKey='Simulator', baseFolder='./mat_files/', filePrefix='stream', storageMode='fileSize', 
-                 streamFileSize=None, streamTime=None, **flags):
+    def __init__(self, matlabKey='Simulator', baseFolder='./mat_files/', 
+                 filePrefix='stream', storageMode='fileSize', 
+                 streamFileSize=None, streamTime=None, 
+                 fileSizeScaler=None, timeLenScaler=None, **flags):
         
         # name or key to store matlab data structure
         self._matlabKey = matlabKey
@@ -52,10 +54,13 @@ class DataSaver:
         # check for ambiguous setup
         if streamFileSize and streamTime:
             raise Exception('Congruent storage mode setup! Please choose only one of the given stream setups.')
-        else:
-            self.SetStreamFileSize( streamFileSize if streamFileSize else self.__maxStrmFlSize__ )
-            self.SetStreamTime    ( streamTime     if streamTime     else self.__maxStrmTime__   )
-            
+        
+        self.SetStreamFileSize( streamFileSize if streamFileSize else self.__maxStrmFlSize__ )
+        self.SetStreamTime    ( streamTime     if streamTime     else self.__maxStrmTime__   )
+        
+        self._fileSizeScaler = fileSizeScaler if fileSizeScaler else self.__fileSizeScaler__
+        self._timeLenScaler  = timeLenScaler  if timeLenScaler  else self.__timeLenScaler__
+        
         # store mat files under this path
         self._baseFolder    = ''
         self._streamFolder  = ''
@@ -154,7 +159,6 @@ class DataSaver:
         assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
         
         self._maxStreamTime = streamTime
-
 
 ### --------------------------------------------------------------------------------------------------
         

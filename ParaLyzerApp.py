@@ -49,7 +49,9 @@ class ParaLyzerApp(Logger, StatusBar):
             'nmo': 'M-',
             'ppa': 'P+',
             'npa': 'P-',
-            'swd': 'Switch Delay:'
+            'swd': 'Switch Delay:',
+            'stm': 'File size:',
+            'unt': 'MB'
         }
        
 ### -------------------------------------------------------------------------------------------------------------------------------
@@ -365,14 +367,30 @@ class ParaLyzerApp(Logger, StatusBar):
         
         
         
-        ####################
-        #   --- MISC ---   #
-        ####################
-        self.lfrms['msc'] = tk.LabelFrame(self.frms['swmc'], text='Misc: ', font=('Helvetica', 12))
-        self.lfrms['msc'].pack(anchor=tk.NW, padx=15, pady=15)
+        ############################
+        #   --- STORAGE MODE ---   #
+        ############################
+        self.lfrms['stm'] = tk.LabelFrame(self.frms['swmc'], text='Storage Mode: ', font=('Helvetica', 12))
+        self.lfrms['stm'].pack(anchor=tk.NW, padx=15, pady=15)
         
-        self.CreateCheckButton( self.lfrms['msc'], 'dbg', anchor=tk.W )
-        self.CreateCheckButton( self.lfrms['msc'], 'enn', anchor=tk.W )
+        # change storage mode menu
+        self.optm_opts['csm'] = ['File size', 'Record time', 'Tilter sync']
+        self.optm_vals['csm'] = tk.StringVar(value=self.optm_opts['csm'][0])
+        
+        # trace wants a callback with nearly useless parameters, fixing with lambda.
+        self.optm_vals['csm'].trace('w', lambda nm, idx, mode, key='csm', var=self.optm_vals['csm']: self.onComboChange(key, var))
+        
+        self.optm['csm'] = tk.OptionMenu(self.lfrms['stm'], self.optm_vals['csm'], *self.optm_opts['csm'])
+        self.optm['csm'].pack(anchor=tk.CENTER, pady=10)
+        
+        self.CreateLabel    ( self.lfrms['stm'], 'stm', side=tk.LEFT                                    )
+        self.CreateUserEntry( self.lfrms['stm'], 'stm', '10.0', width=6, justify=tk.RIGHT, side=tk.LEFT )
+        self.CreateLabel    ( self.lfrms['stm'], 'unt'                                                  )
+        
+        # not in usage
+        # debug messages are always printed to log
+#        self.CreateCheckButton( self.lfrms['msc'], 'dbg', anchor=tk.W )
+#        self.CreateCheckButton( self.lfrms['msc'], 'enn', anchor=tk.W )
         
         
         
@@ -536,6 +554,7 @@ class ParaLyzerApp(Logger, StatusBar):
         
         # bind three events to check the time
         self.entrs[key].bind('<Key>'     , lambda event, key=key: self.ValidateTime(event, key) )
+        self.entrs[key].bind('<Return>'  , lambda event, key=key: self.onPressKey  (event, key) )
         self.entrs[key].bind('<FocusIn>' , lambda event, key=key: self.ValidateTime(event, key) )
         self.entrs[key].bind('<FocusOut>', lambda event, key=key: self.ValidateTime(event, key) )
         self.entrs[key].pack(**kwargs)
@@ -617,12 +636,12 @@ class ParaLyzerApp(Logger, StatusBar):
                 else:
                     self.ckbtns[key].deselect()
             
-            # special treatment for debug mode, since keys in ckbtn list are only three letters
-            elif 'debugMode' in guiFlags.keys():
-                if guiFlags['debugMode']:
-                    self.ckbtns['dbg'].select()
-                else:
-                    self.ckbtns['dbg'].deselect()
+#            # special treatment for debug mode, since keys in ckbtn list are only three letters
+#            elif 'debugMode' in guiFlags.keys():
+#                if guiFlags['debugMode']:
+#                    self.ckbtns['dbg'].select()
+#                else:
+#                    self.ckbtns['dbg'].deselect()
                     
         self.UpdateStreamFlags(**guiFlags)
             
@@ -676,9 +695,9 @@ class ParaLyzerApp(Logger, StatusBar):
                     # change state accordingly
                     self.entrs[key].configure(state=state)
             
-            for key in self.ckbtns.keys():
-                if 'id' in key:
-                    self.UpdateEntryColors( key, self.ckbtn_vals[key].get() )
+#            for key in self.ckbtns.keys():
+#                if 'id' in key:
+#                    self.UpdateEntryColors( key, self.ckbtn_vals[key].get() )
             
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -752,32 +771,32 @@ class ParaLyzerApp(Logger, StatusBar):
             
 ### -------------------------------------------------------------------------------------------------------------------------------
     
-    def UpdateEntryColors(self, key, state):
-        
-        # initial values for counter and viability timings
-        entrKey = key.replace('id','')
-        
-        # if checkbox is not checked don't set new timings
-        # color them accordingly
-        if state and key != 'scv':
-            # check status of check and radio boxes
-            # if still default change background color
-            for key in ['cnti', 'viai', 'cntofa', 'viaofa']:
-                if self.CheckEnableEntries(key):
-                    if key in ['cnti', 'viai']:
-                        tString = self.entrs[key+entrKey].get()
-                    elif key in ['cntofa', 'viaofa']:
-                        tString = self.entrs[key].get()
-                        
-        # state not checked
-        # reset colors
-        elif not state:
-            if 'id' in key:
-                self.entrs['cnti%s'%entrKey].configure( bg='SystemWindow' )
-                self.entrs['viai%s'%entrKey].configure( bg='SystemWindow' )
-            elif key in ['ofa', 'scv', 'swt']:
-                self.entrs['cntofa'].configure( bg='SystemWindow' )
-                self.entrs['viaofa'].configure( bg='SystemWindow' )
+#    def UpdateEntryColors(self, key, state):
+#        
+#        # initial values for counter and viability timings
+#        entrKey = key.replace('id','')
+#        
+#        # if checkbox is not checked don't set new timings
+#        # color them accordingly
+#        if state and key != 'scv':
+#            # check status of check and radio boxes
+#            # if still default change background color
+#            for key in ['cnti', 'viai', 'cntofa', 'viaofa']:
+#                if self.CheckEnableEntries(key):
+#                    if key in ['cnti', 'viai']:
+#                        tString = self.entrs[key+entrKey].get()
+#                    elif key in ['cntofa', 'viaofa']:
+#                        tString = self.entrs[key].get()
+#                        
+#        # state not checked
+#        # reset colors
+#        elif not state:
+#            if 'id' in key:
+#                self.entrs['cnti%s'%entrKey].configure( bg='SystemWindow' )
+#                self.entrs['viai%s'%entrKey].configure( bg='SystemWindow' )
+#            elif key in ['ofa', 'scv', 'swt']:
+#                self.entrs['cntofa'].configure( bg='SystemWindow' )
+#                self.entrs['viaofa'].configure( bg='SystemWindow' )
         
 ### -------------------------------------------------------------------------------------------------------------------------------
     
@@ -935,6 +954,47 @@ class ParaLyzerApp(Logger, StatusBar):
                     tStrings['viai'] = val
                     
         return tStrings
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+        
+    def UpdateStorageMode(self, var):
+        
+        self.lbl_txts['stm'] = var
+        
+        if var == 'File size':
+        
+            self.entrs['stm'].configure(state=tk.NORMAL)
+            self.lbl_txts['unt'] = 'MB'
+            
+            storageMode = 'fileSize'
+            
+            self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
+            
+        elif var == 'Record time':
+            
+            self.entrs['stm'].configure(state=tk.NORMAL)
+            self.lbl_txts['unt'] = 'min'
+            
+            storageMode = 'recordTime'
+            
+            self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
+        
+        elif var == 'Tilter sync':
+            
+            self.entrs['stm'].configure(state=tk.DISABLED)
+            self.lbl_txts['unt'] = ''
+            
+            storageMode = 'eventSync'
+        
+        else:
+            Exception('Uknown error occured during storage mode change!')
+        
+        self.UpdateLabelText('stm')
+        self.UpdateLabelText('unt')
+        
+        self.paraLyzerCore.hf2.SetStorageMode(storageMode)
+        
+        self.UpdateRightStatus('Storage mode updated.')
         
 ### -------------------------------------------------------------------------------------------------------------------------------
         
@@ -1345,24 +1405,24 @@ class ParaLyzerApp(Logger, StatusBar):
         elif selected == 'via':
             self.streamFlags['cnti'] = False
             self.streamFlags['viai'] = True
-        
-        
-#        if selected == 'usr':
-#            self.btns['usr'].configure(state=tk.NORMAL)
-#        else:
-#            self.btns['usr'].configure(state=tk.DISABLED)
-            
                 
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def onComboChange(self, key, var):
         self.logger.debug('Combo box \'%s\' was changed to \'%s\'' % (key, var.get()))
         
-        self.UpdateEntryTimeBase(var)
-        
-        # inform start button procedure that there was a change
-        self.ePairsChanged = True
+        # change storage mode
+        if key == 'csm':
+            self.UpdateStorageMode(var.get())
                 
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def onPressKey(self, event, key):
+        
+        if key == 'stm':
+            self.UpdateStorageMode(self.optm_vals['csm'].get())
+        
+        
 ### -------------------------------------------------------------------------------------------------------------------------------
     
     def onClose(self):
