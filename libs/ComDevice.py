@@ -87,12 +87,8 @@ class ComDevice:
     def DetectDevice(self):
         # try to detect com device
         
-        # reset com port variables
-        self._comPortList    = []
-        self._comPortListIdx = 0
-        self.comPort         = None
-        self.comPortInfo     = None
-        self.comPortStatus   = False
+        # reset com port status
+        self.ResetComPort()
         
         # put message to the logger
         if self._detMsg:
@@ -184,6 +180,17 @@ class ComDevice:
                 sleep(1e-4)
                 
             self.SafeCloseComPort()
+            
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def ResetComPort(self):
+        ''' Reset comport status and all related variables
+        '''
+        self._comPortList    = []
+        self._comPortListIdx = 0
+        self.comPort         = None
+        self.comPortInfo     = None
+        self.comPortStatus   = False
             
 ### -------------------------------------------------------------------------------------------------------------------------------
     

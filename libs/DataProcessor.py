@@ -104,7 +104,8 @@ class DataSaver:
         fName = self._streamFolder + self._filePrefix + '%05d.mat'%self._fileCounter
         
 #        print(fName)
-#        print(self.deviceName)
+#        print(self._matlabKey)
+#        print(self._data)
         
         # store the file
         io.savemat(fName, {self._matlabKey: self._data})
@@ -159,6 +160,11 @@ class DataSaver:
         assert streamTime > 0, 'Streaming time needs to be larger than 0!'
         
         self._maxStreamTime = streamTime
+        
+### -------------------------------------------------------------------------------------------------------------------------------
+    
+    def ResetFileCounter(self):
+        self._fileCounter = 0
 
 ### --------------------------------------------------------------------------------------------------
         
@@ -242,6 +248,10 @@ class DataProcessor(DataSaver):
 
                 self.DataProcessor(newData)
                 
+                # estimate size
+                # NOTE: several parts are missing here, like r, psd and motility - add them later to make it faster
+                self._dataSize = coreUtils.GetTotalSize(self._data)
+                
                 # indicate that current task was done
                 self._newDataQueue.task_done()
                 
@@ -265,13 +275,7 @@ class DataProcessor(DataSaver):
         ''' Actual data processor function called by _Dequeuer.
             Intended to be overridden by the user in case a customized
             handling is desired.
-            Data size should be updated if original strucutre is mostly changed:
-            self._dataSize += coreUtils.GetTotalSize(...)
         '''
-        
-        # estimate size
-        # NOTE: several parts are missing here, like r, psd and motility - add them later to make it faster
-        self._dataSize += coreUtils.GetTotalSize(newData)
         
         for demod,data in newData.items():
             
@@ -326,7 +330,7 @@ class DataProcessor(DataSaver):
                             self._data[demod]['r'][k] = sp.concatenate( [self._data[demod]['r'][k], r] )
                             
                             # and don't forget to update size
-                            self._dataSize += coreUtils.GetTotalSize(r)
+#                            self._dataSize += coreUtils.GetTotalSize(r)
 
                         # OR values that need a reference first
                         elif key == 't':
@@ -391,8 +395,10 @@ class DataProcessor(DataSaver):
         
         # here we are sure nothing is running
         # so we can save the rest of the data
-#        if self.GetDataSize() > 0:
-#            self._SaveData()
+        if self.GetDataSize() > 0:
+            self._SaveData()
+
+        self.ResetFileCounter()
         
 ### --------------------------------------------------------------------------------------------------
     

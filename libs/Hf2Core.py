@@ -78,9 +78,7 @@ class Hf2Core(CoreDevice, DataProcessor):
         CoreDevice.__init__(self, **flags)
         
         # in case no device was found use simulation mode
-        if not self.comPortStatus:
-            global __simulationMode__
-            __simulationMode__ = True
+        if not self.comPortStatus and __simulationMode__:
             self.deviceName = 'Simulator'
             self.logger.warning('Simulation mode enabled!')
             
@@ -103,6 +101,9 @@ class Hf2Core(CoreDevice, DataProcessor):
         
     def DetectDeviceAndSetupPort(self):
         
+        # reset com port variables
+        self.ResetComPort()
+        
         for device in self.__deviceId__:
             
             self.logger.info('Try to detect %s...' % device)
@@ -111,9 +112,6 @@ class Hf2Core(CoreDevice, DataProcessor):
                 (daq, device, props) = zhinst.utils.create_api_session( device, self.__deviceApiLevel__ )
             except RuntimeError:
                 self.logger.info('Could not be found')
-            except NameError:
-                global __simulationMode__
-                __simulationMode__ = True
             else:
                 self.logger.info('Created API session for \'%s\' on \'%s:%s\' with api level \'%s\'' % (device, props['serveraddress'], props['serverport'], props['apilevel']))
                 

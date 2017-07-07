@@ -959,42 +959,44 @@ class ParaLyzerApp(Logger, StatusBar):
         
     def UpdateStorageMode(self, var):
         
-        self.lbl_txts['stm'] = var
+        if not self.paraLyzerCore.IsRunning():
         
-        if var == 'File size':
-        
-            self.entrs['stm'].configure(state=tk.NORMAL)
-            self.lbl_txts['unt'] = 'MB'
+            self.lbl_txts['stm'] = var
             
-            storageMode = 'fileSize'
+            if var == 'File size':
             
-            self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
+                self.entrs['stm'].configure(state=tk.NORMAL)
+                self.lbl_txts['unt'] = 'MB'
+                
+                storageMode = 'fileSize'
+                
+                self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
+                
+            elif var == 'Record time':
+                
+                self.entrs['stm'].configure(state=tk.NORMAL)
+                self.lbl_txts['unt'] = 'min'
+                
+                storageMode = 'recordTime'
+                
+                self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
             
-        elif var == 'Record time':
+            elif var == 'Tilter sync':
+                
+                self.entrs['stm'].configure(state=tk.DISABLED)
+                self.lbl_txts['unt'] = ''
+                
+                storageMode = 'eventSync'
             
-            self.entrs['stm'].configure(state=tk.NORMAL)
-            self.lbl_txts['unt'] = 'min'
+            else:
+                Exception('Uknown error occured during storage mode change!')
             
-            storageMode = 'recordTime'
+            self.UpdateLabelText('stm')
+            self.UpdateLabelText('unt')
             
-            self.paraLyzerCore.hf2.SetStreamFileSize(float(self.entrs['stm'].get()))
-        
-        elif var == 'Tilter sync':
+            self.paraLyzerCore.hf2.SetStorageMode(storageMode)
             
-            self.entrs['stm'].configure(state=tk.DISABLED)
-            self.lbl_txts['unt'] = ''
-            
-            storageMode = 'eventSync'
-        
-        else:
-            Exception('Uknown error occured during storage mode change!')
-        
-        self.UpdateLabelText('stm')
-        self.UpdateLabelText('unt')
-        
-        self.paraLyzerCore.hf2.SetStorageMode(storageMode)
-        
-        self.UpdateRightStatus('Storage mode updated.')
+            self.UpdateRightStatus('Storage mode updated.')
         
 ### -------------------------------------------------------------------------------------------------------------------------------
         
@@ -1043,7 +1045,8 @@ class ParaLyzerApp(Logger, StatusBar):
                         self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['cnti'])
                         
                         # in case it's needed by SetupArduino for delay events
-                        self.streamFlags['switchDelay'] = float(self.GetTimeFromUserEntry('swd'))
+                        if self.ckbtn_vals['swt'].get():
+                            self.streamFlags['switchDelay'] = float(self.entrs['swd'].get())
                         
                     # process viability interval
                     if 'viai' in interval.keys():
@@ -1053,7 +1056,9 @@ class ParaLyzerApp(Logger, StatusBar):
                         self.paraLyzerCore.arduino.DefineElectrodePair(ePair, interval['viai'])
                         
                         # in case it's needed by SetupArduino for delay events
-#                        self.streamFlags['stopDelay'] = tNums['viai']
+                        # NOTE: maybe use another user entry
+                        if self.ckbtn_vals['swt'].get():
+                            self.streamFlags['switchDelay'] = float(self.entrs['swd'].get())
                             
                         
         # check if values are correct
@@ -1427,7 +1432,7 @@ class ParaLyzerApp(Logger, StatusBar):
     
     def onClose(self):
         
-        if not self.stopTimeThread:
+        if self.paraLyzerCore.IsRunning():
             title = 'Warning'
             msg   = 'Recording is currently running!\nDo you really want to quit?'
         else:

@@ -574,41 +574,41 @@ void writeDaisyChain() {
   // write zeros till switch
   while (--swIdx > actSwIdx) {
     CLOCK_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
     CLOCK_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   }
   
   // write one for switch
   // data is captured on falling edge of clock
   CLOCK_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   DATA_OUT_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   CLOCK_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   DATA_OUT_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
     
   actSwIdx = userSwitchingScheme[chamberIdx].activeSwitches[0];     // also change here cause it's decrementing...
   // write zeros till switch
   while (--swIdx > actSwIdx) {
     CLOCK_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
     CLOCK_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   }
   
   // write one for switch
   // data is captured on falling edge of clock
   CLOCK_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   DATA_OUT_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   CLOCK_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   DATA_OUT_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
 
   ////////////////////////////////////////////////////
   //          --- INSERT BLOCK HERE ---             //
@@ -618,9 +618,9 @@ void writeDaisyChain() {
   // write zeros till last switch index...no more active ones after that
   while (--swIdx > -1) {
     CLOCK_HIGH;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
     CLOCK_LOW;
-    delayMicroseconds(del);
+//    delayMicroseconds(del);
   }
   
   // tell all switches to read register content

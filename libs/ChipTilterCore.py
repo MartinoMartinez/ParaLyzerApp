@@ -318,8 +318,6 @@ class ChipTilterCore(CoreDevice):
                             
                         self._tilterState['isMoving']  = False
                         self._tilterState['isWaiting'] = True
-
-                        print('isWaiting')
                         
                 # check motion time
                 elif self._currentParameterSet['m'] > 0 and self._currentParameterSet['p'] == 0:
@@ -350,8 +348,6 @@ class ChipTilterCore(CoreDevice):
                         # update states
                         self._tilterState['isMoving']  = True
                         self._tilterState['isWaiting'] = False
-
-                        print('isMoving')
                             
                     # there might be a transition from up to down if there's not horizontal waiting...
                     # can be detected if the new time if larger than the old one
@@ -372,8 +368,6 @@ class ChipTilterCore(CoreDevice):
                             self._tilterState['numCycles'] += 1
 
                             self._EventHandler('onPosDown')
-                            
-                        print('transition')
                         
 
                     # set new 'old' value for next comparision
@@ -400,8 +394,6 @@ class ChipTilterCore(CoreDevice):
 
     def _EventHandler(self, event):
         
-#        print('event in EventHandler: %s' % event)
-        
         # call user defined function
         if self._tilterEvents[event]['defined']:
             
@@ -423,16 +415,6 @@ class ChipTilterCore(CoreDevice):
                         
                     self._eventThreads[eventKey] = threading.Thread( target=lambda event=event, func=funcIdx: self._DelayEvent(event, func) )
                     self._eventThreads[eventKey].start()
-#                    
-#                    # if delay is zero, directly call callback
-#                    if self._tilterEvents[event]['delay'][funcIdx] == 0:
-#                        self._tilterEvents[event]['cb'][funcIdx]()
-#                    # otherwise use DelayEvent
-#                    else:
-#                        self._eventThread.update( { = )
-#                        self._eventThread.start()
-#                        self._eventThread.join()
-                    
                     
                     # reset iteration counter
                     self._tilterEvents[event]['itercnt'][funcIdx] = 0
