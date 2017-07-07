@@ -147,7 +147,7 @@ class DataSaver:
     def SetStreamFileSize(self, fileSize):
         
         assert isinstance(fileSize, int) or isinstance(fileSize, float), 'Expected int or float, not %r' % type(fileSize)
-        assert fileSize > 0, 'File size needs to be larger than 0 MB!'
+        assert fileSize > 0, 'File size needs to be larger than 0!'
         
         self._maxStreamFileSize = fileSize
         
@@ -156,7 +156,7 @@ class DataSaver:
     def SetStreamTime(self, streamTime):
         
         assert isinstance(streamTime, int) or isinstance(streamTime, float), 'Expected int or float, not %r' % type(streamTime)
-        assert streamTime > 0, 'Streaming time needs to be larger than 0 min!'
+        assert streamTime > 0, 'Streaming time needs to be larger than 0!'
         
         self._maxStreamTime = streamTime
 
@@ -222,6 +222,10 @@ class DataProcessor(DataSaver):
 ### --------------------------------------------------------------------------------------------------
 
     def _Dequeuer(self):
+        ''' Processor loop.
+            Indefinetly calls DataProcessor to process incoming data stream.
+            According to storage mode, files are being written.
+        '''
         
         # run as long as user puts new data
         while self._activeProcessor:
@@ -245,11 +249,11 @@ class DataProcessor(DataSaver):
                 
                 # check, according to strorage mode, if it's necessary to store a new file
                 if self._storageMode == 'fileSize':
-                    if self.GetDataSize(self.__fileSizeScaler__) > self._maxStreamFileSize:
+                    if self.GetDataSize(self._fileSizeScaler) > self._maxStreamFileSize:
                         self._SaveData()
                         
                 elif self._storageMode == 'recTime':
-                    if self.GetRunTime(self.__timeLenScaler__) > self._maxStreamTime:
+                    if self.GetRunTime(self._timeLenScaler) > self._maxStreamTime:
                         self._SaveData()
                         
                 elif self._storageMode == 'eventSync':
@@ -258,6 +262,12 @@ class DataProcessor(DataSaver):
 ### --------------------------------------------------------------------------------------------------
                     
     def DataProcessor(self, newData):
+        ''' Actual data processor function called by _Dequeuer.
+            Intended to be overridden by the user in case a customized
+            handling is desired.
+            Data size should be updated if original strucutre is mostly changed:
+            self._dataSize += coreUtils.GetTotalSize(...)
+        '''
         
         # estimate size
         # NOTE: several parts are missing here, like r, psd and motility - add them later to make it faster
@@ -381,8 +391,8 @@ class DataProcessor(DataSaver):
         
         # here we are sure nothing is running
         # so we can save the rest of the data
-        if self.GetDataSize() > 0:
-            self._SaveData()
+#        if self.GetDataSize() > 0:
+#            self._SaveData()
         
 ### --------------------------------------------------------------------------------------------------
     
@@ -449,6 +459,9 @@ class DataProcessor(DataSaver):
 ### --------------------------------------------------------------------------------------------------
                     
     def DemodNumber(self, s):
+        ''' Returns the corresponding demodulator number 
+            extracted from the given string.
+        '''
         return int(s.split('/')[-2])
     
 ### --------------------------------------------------------------------------------------------------
@@ -465,11 +478,17 @@ class DataProcessor(DataSaver):
 ### --------------------------------------------------------------------------------------------------
                     
     def GetData(self):
+        ''' Return the current data structure.
+            NOTE: Can already be changed while it is returned
+                  when processor is running!
+        '''
         return self._data
+    
 ### --------------------------------------------------------------------------------------------------
                     
     def GetDataSize(self, scale='MB'):
-        ''' return the size in bytes, kB, MB or GB, depending on the scale '''
+        ''' return the size in bytes, kB, MB or GB, depending on the scale
+        '''
         
         if scale == 'B':
             return self._dataSize
@@ -485,7 +504,8 @@ class DataProcessor(DataSaver):
 ### --------------------------------------------------------------------------------------------------
                     
     def GetRunTime(self, scale='min'):
-        ''' return the run time since last start was invoked '''
+        ''' return the run time since last start was invoked
+        '''
         
         if scale == 'sec':
             return time()-self._startTime
@@ -506,8 +526,6 @@ class DataProcessor(DataSaver):
 
 
 if __name__ == '__main__':
-    
-    from time import perf_counter
     
     dataProcessor = DataProcessor()
     
